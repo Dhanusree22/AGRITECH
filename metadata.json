@@ -1,0 +1,6 @@
+{
+  "name": "AGRITECH - 3D AI Agricultural Trading Platform",
+  "description": "Next-generation 3D AI-powered Agricultural Trading Platform connecting Farmers, Buyers, and Administrators with real-time mandi prices, AI price predictions, voice assistance, and multilingual intelligence.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
