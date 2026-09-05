@@ -21,7 +21,7 @@ export const MarketplacePage: React.FC<{ navigate: (path: string) => void }> = (
   const [onlyOrganic, setOnlyOrganic] = useState(false);
   const [sortBy, setSortBy] = useState<'price_asc' | 'price_desc' | 'rating' | 'demand'>('demand');
 
-  const filteredCrops = crops
+  const filteredCrops = (crops || [])
     .filter((crop) => {
       const matchesSearch =
         crop.cropName.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -45,11 +45,11 @@ export const MarketplacePage: React.FC<{ navigate: (path: string) => void }> = (
       <div className="text-center max-w-3xl mx-auto space-y-3">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-100 border border-emerald-200 text-[#064e3b] text-xs font-bold">
           <Package className="w-3.5 h-3.5" />
-          <span>Real-Time Indian Agricultural Exchange</span>
+          <span>{t('Real-Time Indian Agricultural Exchange')}</span>
         </div>
-        <h1 className="text-3xl sm:text-5xl font-extrabold text-[#064e3b] tracking-tight">Direct Farm Produce Marketplace</h1>
+        <h1 className="text-3xl sm:text-5xl font-extrabold text-[#064e3b] tracking-tight">{t('Direct Farm Produce Marketplace')}</h1>
         <p className="text-xs sm:text-sm text-[#064e3b70]">
-          Source farm-fresh vegetables, fruits, grains, and cash crops directly from verified Indian farmers with verified quality scores.
+          {t('Source farm-fresh vegetables, fruits, grains, and cash crops directly from verified Indian farmers with verified quality scores.')}
         </p>
       </div>
 
@@ -60,7 +60,7 @@ export const MarketplacePage: React.FC<{ navigate: (path: string) => void }> = (
             <Search className="w-4 h-4 text-[#064e3b60] absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Search by crop, hybrid variety, farmer name, or district..."
+              placeholder={t('Search by crop, hybrid variety, farmer name, or district...')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 rounded-full bg-[#f1f5f2]/70 border border-[#064e3b20] text-xs text-[#064e3b] focus:border-[#064e3b] focus:outline-none placeholder:text-[#064e3b50]"
@@ -72,11 +72,11 @@ export const MarketplacePage: React.FC<{ navigate: (path: string) => void }> = (
             onChange={(e) => setSelectedCategory(e.target.value)}
             className="px-3.5 py-2.5 rounded-full bg-[#f1f5f2]/70 border border-[#064e3b20] text-xs text-[#064e3b] focus:border-[#064e3b] focus:outline-none"
           >
-            <option value="All">All Categories</option>
-            <option value="Vegetables">Vegetables</option>
-            <option value="Fruits">Fruits</option>
-            <option value="Grains & Cereals">Grains & Cereals</option>
-            <option value="Cash Crops">Cash Crops</option>
+            <option value="All">{t('All Categories')}</option>
+            <option value="Vegetables">{t('Vegetables')}</option>
+            <option value="Fruits">{t('Fruits')}</option>
+            <option value="Grains & Cereals">{t('Grains & Cereals')}</option>
+            <option value="Cash Crops">{t('Cash Crops')}</option>
           </select>
 
           <select
@@ -84,9 +84,9 @@ export const MarketplacePage: React.FC<{ navigate: (path: string) => void }> = (
             onChange={(e) => setSelectedGrade(e.target.value)}
             className="px-3.5 py-2.5 rounded-full bg-[#f1f5f2]/70 border border-[#064e3b20] text-xs text-[#064e3b] focus:border-[#064e3b] focus:outline-none"
           >
-            <option value="All">All Quality Grades</option>
-            <option value="Grade A">Grade A (Score 90+)</option>
-            <option value="Grade B">Grade B</option>
+            <option value="All">{t('All Quality Grades')}</option>
+            <option value="Grade A">{t('Grade A (Score 90+)')}</option>
+            <option value="Grade B">{t('Grade B')}</option>
           </select>
 
           <select
@@ -94,10 +94,10 @@ export const MarketplacePage: React.FC<{ navigate: (path: string) => void }> = (
             onChange={(e) => setSortBy(e.target.value as any)}
             className="px-3.5 py-2.5 rounded-full bg-[#f1f5f2]/70 border border-[#064e3b20] text-xs text-[#064e3b] focus:border-[#064e3b] focus:outline-none"
           >
-            <option value="demand">AI Demand Rank</option>
-            <option value="price_asc">Price: Low to High</option>
-            <option value="price_desc">Price: High to Low</option>
-            <option value="rating">Farmer Rating</option>
+            <option value="demand">{t('AI Demand Rank')}</option>
+            <option value="price_asc">{t('Price: Low to High')}</option>
+            <option value="price_desc">{t('Price: High to Low')}</option>
+            <option value="rating">{t('Farmer Rating')}</option>
           </select>
 
           <label className="flex items-center gap-2 px-3.5 py-2.5 rounded-full bg-[#f1f5f2]/70 border border-[#064e3b20] text-xs text-[#064e3b] cursor-pointer">
@@ -107,7 +107,7 @@ export const MarketplacePage: React.FC<{ navigate: (path: string) => void }> = (
               onChange={(e) => setOnlyOrganic(e.target.checked)}
               className="rounded text-[#064e3b]"
             />
-            Organic Certified
+            <span>{t('Only Organic Certified')}</span>
           </label>
         </div>
       </div>

@@ -55,13 +55,13 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate }) => {
         <div className="bg-[#064e3b] px-4 py-1.5 text-xs text-emerald-100 flex items-center justify-between border-b border-emerald-800">
           <div className="flex items-center gap-2 overflow-hidden whitespace-nowrap">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-            <span className="font-bold text-amber-300">LIVE MANDI TICKER:</span>
-            <span className="text-emerald-100">Tomato ₹32/kg (↑ 8.4%) • Onion ₹28/kg (↓ 2.1%) • Potato ₹24/kg (↑ 4.7%) • Sona Masoori Rice ₹58/kg (↑ 1.8%)</span>
+            <span className="font-bold text-amber-300">{t('LIVE MANDI TICKER:')}</span>
+            <span className="text-emerald-100">{t('Tomato (Hybrid)')} ₹32/kg (↑ 8.4%) • {t('Red Onion')} ₹28/kg (↓ 2.1%) • {t('Potato (Jyoti)')} ₹24/kg (↑ 4.7%) • {t('Sona Masoori Rice')} ₹58/kg (↑ 1.8%)</span>
           </div>
           <div className="hidden md:flex items-center gap-3 text-[11px] text-emerald-200">
-            <span>📞 Kisan Helpline: 1800-180-1551 (Toll-Free)</span>
+            <span>📞 {t('Kisan Helpline: 1800-180-1551 (Toll-Free)')}</span>
             <span className="text-emerald-400">•</span>
-            <span className="font-semibold text-amber-300">Escrow Protected Trading</span>
+            <span className="font-semibold text-amber-300">{t('Escrow Protected Trading')}</span>
           </div>
         </div>
 

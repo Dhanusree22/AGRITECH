@@ -76,13 +76,13 @@ export const BuyerDashboard: React.FC<{ navigate: (path: string) => void; initia
   const [voiceOpen, setVoiceOpen] = useState(false);
 
   // Metrics
-  const myOrders = orders.filter((o) => o.buyerId === user?.id || true);
-  const totalVolumeProcuredKg = myOrders.reduce((acc, o) => acc + o.quantityKg, 0);
-  const totalSpend = myOrders.reduce((acc, o) => acc + o.totalAmount, 0);
-  const activeEscrowAmount = myOrders.filter((o) => o.paymentStatus === 'Escrow Secured').reduce((acc, o) => acc + o.totalAmount, 0);
+  const myOrders = (orders || []).filter((o) => o.buyerId === user?.id || true);
+  const totalVolumeProcuredKg = myOrders.reduce((acc, o) => acc + (o.quantityKg || 0), 0);
+  const totalSpend = myOrders.reduce((acc, o) => acc + (o.totalAmount || 0), 0);
+  const activeEscrowAmount = myOrders.filter((o) => o.paymentStatus === 'Escrow Secured').reduce((acc, o) => acc + (o.totalAmount || 0), 0);
 
   // Filtered Marketplace Crops
-  const filteredCrops = crops.filter((crop) => {
+  const filteredCrops = (crops || []).filter((crop) => {
     const matchesSearch =
       crop.cropName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       crop.farmerLocation.toLowerCase().includes(searchQuery.toLowerCase()) ||

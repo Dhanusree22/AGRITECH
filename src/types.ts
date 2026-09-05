@@ -210,6 +210,30 @@ export interface AdvisoryAlert {
   actionRequired: string;
 }
 
+export interface KYCRequest {
+  id: string;
+  userId: string;
+  userName: string;
+  userRole: UserRole;
+  docType: 'Kisan Credit Card' | 'Aadhaar Card' | 'Land Record 7/12' | 'FPO Registration' | 'GSTIN Certificate' | 'FSSAI License';
+  docNumber: string;
+  submittedDate: string;
+  status: 'Pending' | 'Approved' | 'Rejected';
+}
+
+export interface DisputeItem {
+  id: string;
+  orderId: string;
+  cropName: string;
+  buyerName: string;
+  farmerName: string;
+  disputedAmount: number;
+  reason: string;
+  status: 'Under Review' | 'Resolved - Buyer Refunded' | 'Resolved - Released to Farmer';
+  resolutionNotes?: string;
+  createdAt: string;
+}
+
 export interface NotificationItem {
   id: string;
   title: string;

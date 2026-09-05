@@ -11,6 +11,8 @@ import {
   FarmExpense,
   AdvisoryAlert,
   NotificationItem,
+  KYCRequest,
+  DisputeItem,
 } from '../types';
 
 interface StoreContextType {
@@ -26,6 +28,8 @@ interface StoreContextType {
   advisoryAlerts: AdvisoryAlert[];
   notifications: NotificationItem[];
   unreadNotificationCount: number;
+  kycRequests: KYCRequest[];
+  disputes: DisputeItem[];
 
   // Actions
   addCrop: (crop: Omit<CropListing, 'id' | 'status'>) => void;
@@ -33,9 +37,13 @@ interface StoreContextType {
   deleteCrop: (id: string) => void;
   approveCrop: (id: string) => void;
   rejectCrop: (id: string, reason?: string) => void;
+  updateCropStatus: (id: string, status: CropListing['status']) => void;
 
   createOrder: (order: Omit<OrderItem, 'id' | 'orderNumber' | 'createdAt'>) => string;
   updateOrderStatus: (orderId: string, status: OrderItem['status']) => void;
+
+  verifyKYC: (id: string, status: 'Approved' | 'Rejected') => void;
+  resolveDispute: (id: string, outcome: string, notes: string) => void;
 
   submitReverseBid: (bid: Omit<ReverseBid, 'id' | 'bidDate' | 'status'>) => void;
   createBuyerRequirement: (req: Omit<BuyerRequirement, 'id' | 'offersReceived' | 'status' | 'createdAt'>) => void;
@@ -810,22 +818,105 @@ const INITIAL_NOTIFICATIONS: NotificationItem[] = [
   },
 ];
 
+const INITIAL_KYC_REQUESTS: KYCRequest[] = [
+  {
+    id: 'kyc-01',
+    userId: 'usr-farmer-01',
+    userName: 'Ramesh Patel',
+    userRole: 'farmer',
+    docType: 'Kisan Credit Card',
+    docNumber: 'KCC-KA-5928104',
+    submittedDate: '2026-08-20',
+    status: 'Pending',
+  },
+  {
+    id: 'kyc-02',
+    userId: 'usr-farmer-02',
+    userName: 'Suresh Gowda',
+    userRole: 'farmer',
+    docType: 'Land Record 7/12',
+    docNumber: 'KA-MND-48201',
+    submittedDate: '2026-08-22',
+    status: 'Approved',
+  },
+  {
+    id: 'kyc-03',
+    userId: 'usr-buyer-01',
+    userName: 'FreshMart Retail Hypermarkets',
+    userRole: 'buyer',
+    docType: 'GSTIN Certificate',
+    docNumber: '29ABCDE1234F1Z5',
+    submittedDate: '2026-08-24',
+    status: 'Pending',
+  },
+  {
+    id: 'kyc-04',
+    userId: 'usr-buyer-02',
+    userName: 'Deccan Agro Processors Ltd',
+    userRole: 'buyer',
+    docType: 'FSSAI License',
+    docNumber: 'FSSAI-112233445566',
+    submittedDate: '2026-08-19',
+    status: 'Approved',
+  },
+];
+
+const INITIAL_DISPUTES: DisputeItem[] = [
+  {
+    id: 'disp-01',
+    orderId: 'AGRI-2026-4821',
+    cropName: 'Tomato (Hybrid Shivam)',
+    buyerName: 'FreshMart Hypermarkets',
+    farmerName: 'Ramesh Patel',
+    disputedAmount: 48000,
+    reason: 'Buyer claims 12% produce bruised during 600km transit; farmer claims digital proof of packaging was verified by cold storage.',
+    status: 'Under Review',
+    createdAt: '2026-08-26',
+  },
+  {
+    id: 'disp-02',
+    orderId: 'AGRI-2026-3910',
+    cropName: 'Sona Masoori Rice (10 Ton)',
+    buyerName: 'Deccan Food Processors',
+    farmerName: 'Suresh Gowda',
+    disputedAmount: 120000,
+    reason: 'Moisture content reported at 15.2% vs contract spec 13.5%. Lab test sample dispatched to accredited APMC testing station.',
+    status: 'Under Review',
+    createdAt: '2026-08-27',
+  },
+];
+
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
 
 export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [crops, setCrops] = useState<CropListing[]>(() => {
-    const saved = localStorage.getItem('agritech_crops');
-    return saved ? JSON.parse(saved) : INITIAL_CROPS;
+    try {
+      const saved = localStorage.getItem('agritech_crops');
+      const parsed = saved ? JSON.parse(saved) : null;
+      return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_CROPS;
+    } catch {
+      return INITIAL_CROPS;
+    }
   });
 
   const [mandiPrices, setMandiPrices] = useState<MandiPriceItem[]>(() => {
-    const saved = localStorage.getItem('agritech_mandi');
-    return saved ? JSON.parse(saved) : INITIAL_MANDI_PRICES;
+    try {
+      const saved = localStorage.getItem('agritech_mandi');
+      const parsed = saved ? JSON.parse(saved) : null;
+      return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_MANDI_PRICES;
+    } catch {
+      return INITIAL_MANDI_PRICES;
+    }
   });
 
   const [orders, setOrders] = useState<OrderItem[]>(() => {
-    const saved = localStorage.getItem('agritech_orders');
-    return saved ? JSON.parse(saved) : INITIAL_ORDERS;
+    try {
+      const saved = localStorage.getItem('agritech_orders');
+      const parsed = saved ? JSON.parse(saved) : null;
+      return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_ORDERS;
+    } catch {
+      return INITIAL_ORDERS;
+    }
   });
 
   const [buyerRequirements, setBuyerRequirements] = useState<BuyerRequirement[]>(INITIAL_BUYER_REQUIREMENTS);
@@ -834,13 +925,43 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [cooperativeGroups, setCooperativeGroups] = useState<CooperativeGroup[]>(INITIAL_COOPERATIVES);
   const [logisticsVehicles, setLogisticsVehicles] = useState<LogisticsVehicle[]>(INITIAL_LOGISTICS);
   const [expenses, setExpenses] = useState<FarmExpense[]>(() => {
-    const saved = localStorage.getItem('agritech_expenses');
-    return saved ? JSON.parse(saved) : INITIAL_EXPENSES;
+    try {
+      const saved = localStorage.getItem('agritech_expenses');
+      const parsed = saved ? JSON.parse(saved) : null;
+      return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_EXPENSES;
+    } catch {
+      return INITIAL_EXPENSES;
+    }
   });
   const [advisoryAlerts, setAdvisoryAlerts] = useState<AdvisoryAlert[]>(INITIAL_ADVISORY);
   const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
-    const saved = localStorage.getItem('agritech_notifs');
-    return saved ? JSON.parse(saved) : INITIAL_NOTIFICATIONS;
+    try {
+      const saved = localStorage.getItem('agritech_notifs');
+      const parsed = saved ? JSON.parse(saved) : null;
+      return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_NOTIFICATIONS;
+    } catch {
+      return INITIAL_NOTIFICATIONS;
+    }
+  });
+
+  const [kycRequests, setKycRequests] = useState<KYCRequest[]>(() => {
+    try {
+      const saved = localStorage.getItem('agritech_kyc');
+      const parsed = saved ? JSON.parse(saved) : null;
+      return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_KYC_REQUESTS;
+    } catch {
+      return INITIAL_KYC_REQUESTS;
+    }
+  });
+
+  const [disputes, setDisputes] = useState<DisputeItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('agritech_disputes');
+      const parsed = saved ? JSON.parse(saved) : null;
+      return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_DISPUTES;
+    } catch {
+      return INITIAL_DISPUTES;
+    }
   });
 
   // Save changes
@@ -859,6 +980,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     localStorage.setItem('agritech_notifs', JSON.stringify(notifications));
   }, [notifications]);
+
+  useEffect(() => {
+    localStorage.setItem('agritech_kyc', JSON.stringify(kycRequests));
+  }, [kycRequests]);
+
+  useEffect(() => {
+    localStorage.setItem('agritech_disputes', JSON.stringify(disputes));
+  }, [disputes]);
 
   // Crop CRUD
   const addCrop = (cropData: Omit<CropListing, 'id' | 'status'>) => {
@@ -881,6 +1010,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setCrops((prev) => prev.map((c) => (c.id === id ? { ...c, ...updated } : c)));
   };
 
+  const updateCropStatus = (id: string, status: CropListing['status']) => {
+    setCrops((prev) => prev.map((c) => (c.id === id ? { ...c, status } : c)));
+  };
+
   const deleteCrop = (id: string) => {
     setCrops((prev) => prev.filter((c) => c.id !== id));
   };
@@ -891,6 +1024,35 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const rejectCrop = (id: string) => {
     setCrops((prev) => prev.map((c) => (c.id === id ? { ...c, status: 'Rejected' } : c)));
+  };
+
+  // KYC & Dispute Actions
+  const verifyKYC = (id: string, status: 'Approved' | 'Rejected') => {
+    setKycRequests((prev) => prev.map((k) => (k.id === id ? { ...k, status } : k)));
+    addNotification({
+      title: `KYC Document ${status}`,
+      message: `KYC verification status has been marked as ${status}.`,
+      type: 'alert',
+      targetRole: 'admin',
+    });
+  };
+
+  const resolveDispute = (id: string, outcome: string, notes: string) => {
+    setDisputes((prev) =>
+      prev.map((d) => {
+        if (d.id === id) {
+          const newStatus = outcome.includes('Refund') ? 'Resolved - Buyer Refunded' : 'Resolved - Released to Farmer';
+          return { ...d, status: newStatus as any, resolutionNotes: notes };
+        }
+        return d;
+      })
+    );
+    addNotification({
+      title: 'Dispute Arbitration Concluded',
+      message: `Arbitration outcome: ${outcome}. Notes: ${notes}`,
+      type: 'payment',
+      targetRole: 'admin',
+    });
   };
 
   // Orders
@@ -1064,15 +1226,21 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         advisoryAlerts,
         notifications,
         unreadNotificationCount,
+        kycRequests,
+        disputes,
 
         addCrop,
         updateCrop,
         deleteCrop,
         approveCrop,
         rejectCrop,
+        updateCropStatus,
 
         createOrder,
         updateOrderStatus,
+
+        verifyKYC,
+        resolveDispute,
 
         submitReverseBid,
         createBuyerRequirement,

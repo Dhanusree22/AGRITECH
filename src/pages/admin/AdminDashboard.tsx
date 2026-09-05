@@ -32,15 +32,15 @@ export const AdminDashboard: React.FC<{ navigate: (path: string) => void; initia
   const { user } = useAuth();
   const { t } = useLanguage();
   const {
-    crops,
+    crops = [],
     updateCropStatus,
-    orders,
-    kycRequests,
+    orders = [],
+    kycRequests = [],
     verifyKYC,
-    disputes,
+    disputes = [],
     resolveDispute,
-    mandiPrices,
-    advisoryAlerts,
+    mandiPrices = [],
+    advisoryAlerts = [],
   } = useStore();
 
   const [activeTab, setActiveTab] = useState(initialTab);
@@ -51,8 +51,8 @@ export const AdminDashboard: React.FC<{ navigate: (path: string) => void; initia
   const totalVolumeCr = 145.8;
   const activeEscrowCr = 12.4;
   const platformRevenueLakhs = 84.5;
-  const pendingKycCount = kycRequests.filter((k) => k.status === 'Pending').length;
-  const pendingDisputesCount = disputes.filter((d) => d.status === 'Under Review').length;
+  const pendingKycCount = (kycRequests || []).filter((k) => k.status === 'Pending').length;
+  const pendingDisputesCount = (disputes || []).filter((d) => d.status === 'Under Review').length;
 
   const adminTabs = [
     { id: 'overview', label: '⚙️ Admin Headquarters', icon: Shield },

@@ -88,13 +88,13 @@ export const FarmerDashboard: React.FC<{ navigate: (path: string) => void; initi
   const [bidQty, setBidQty] = useState(2000);
 
   // My farmer crops
-  const myCrops = crops.filter((c) => c.farmerId === user?.id || c.farmerName === user?.name || true); // show crops
+  const myCrops = (crops || []).filter((c) => c.farmerId === user?.id || c.farmerName === user?.name || true); // show crops
 
   // Financial Stats
-  const totalListedQuantity = myCrops.reduce((acc, c) => acc + c.availableQuantityKg, 0);
-  const totalSalesRevenue = orders.reduce((acc, o) => acc + o.totalAmount, 0);
-  const escrowSecured = orders.filter((o) => o.paymentStatus === 'Escrow Secured').reduce((acc, o) => acc + o.totalAmount, 0);
-  const totalExpensesAmount = expenses.reduce((acc, e) => acc + e.amount, 0);
+  const totalListedQuantity = myCrops.reduce((acc, c) => acc + (c.availableQuantityKg || 0), 0);
+  const totalSalesRevenue = (orders || []).reduce((acc, o) => acc + (o.totalAmount || 0), 0);
+  const escrowSecured = (orders || []).filter((o) => o.paymentStatus === 'Escrow Secured').reduce((acc, o) => acc + (o.totalAmount || 0), 0);
+  const totalExpensesAmount = (expenses || []).reduce((acc, e) => acc + (e.amount || 0), 0);
   const netEstimatedProfit = totalSalesRevenue - totalExpensesAmount;
 
   const handleAddCropSubmit = (e: React.FormEvent) => {

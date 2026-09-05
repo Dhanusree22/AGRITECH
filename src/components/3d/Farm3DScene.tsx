@@ -365,12 +365,12 @@ export const Farm3DScene: React.FC<{ onExploreClick?: () => void }> = ({ onExplo
         <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/90 backdrop-blur-md border border-[#064e3b20] text-xs font-bold text-[#064e3b] shadow-lg">
           <span className="w-2 h-2 rounded-full bg-emerald-600 animate-ping" />
           <span className="w-2 h-2 rounded-full bg-emerald-600 -ml-4" />
-          <span>3D APMC Mandi Twin Engine</span>
+          <span>{t('3D APMC Mandi Twin Engine')}</span>
         </div>
 
         <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/90 backdrop-blur-md border border-amber-300 text-xs font-semibold text-amber-900 shadow-lg">
           <Sun className="w-3.5 h-3.5 text-amber-600" />
-          <span>Weather: 26°C Optimal Harvest</span>
+          <span>{t('Weather: 26°C Optimal Harvest')}</span>
         </div>
       </div>
 
@@ -385,17 +385,17 @@ export const Farm3DScene: React.FC<{ onExploreClick?: () => void }> = ({ onExplo
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
               <Activity className="w-3.5 h-3.5 text-emerald-700" />
-              LIVE APMC MANDI
+              {t('LIVE APMC MANDI')}
             </span>
             <span className="inline-flex items-center text-xs font-bold text-emerald-950 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full">
               <TrendingUp className="w-3 h-3 mr-1 text-emerald-700" /> +8.4%
             </span>
           </div>
           <div className="flex items-baseline justify-between">
-            <h4 className="text-base font-bold text-[#064e3b]">Tomato (Hybrid)</h4>
-            <span className="text-xl font-extrabold text-[#064e3b]">₹32<span className="text-xs text-[#064e3b70] font-normal">/kg</span></span>
+            <h4 className="text-base font-bold text-[#064e3b]">{t('Tomato (Hybrid)')}</h4>
+            <span className="text-xl font-extrabold text-[#064e3b]">₹32<span className="text-xs text-[#064e3b70] font-normal">{t('/kg')}</span></span>
           </div>
-          <p className="text-[11px] text-[#064e3b70] mt-1">Kolar Mandi • 420 Tons Arrived Today</p>
+          <p className="text-[11px] text-[#064e3b70] mt-1">{t('Kolar Mandi (Karnataka)')} • 420 {t('Tons')}</p>
         </motion.div>
 
         {/* 2. AI Demand Card */}
@@ -407,15 +407,15 @@ export const Farm3DScene: React.FC<{ onExploreClick?: () => void }> = ({ onExplo
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-[11px] font-bold uppercase tracking-wider text-amber-800 flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-amber-700" />
-              AI DEMAND INDEX
+              {t('AI DEMAND INDEX')}
             </span>
             <span className="text-xs font-bold text-amber-950 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-full">
-              94% Score
+              {t('94% Score')}
             </span>
           </div>
           <div className="flex items-baseline justify-between">
-            <h4 className="text-base font-bold text-[#064e3b]">High Buyer Demand</h4>
-            <span className="text-xs font-semibold text-emerald-800">7-10 Day Surge</span>
+            <h4 className="text-base font-bold text-[#064e3b]">{t('High Buyer Demand')}</h4>
+            <span className="text-xs font-semibold text-emerald-800">{t('7-10 Day Surge')}</span>
           </div>
           <div className="w-full bg-[#f1f5f2] rounded-full h-1.5 mt-2 overflow-hidden">
             <div className="bg-gradient-to-r from-amber-500 to-emerald-600 h-1.5 rounded-full" style={{ width: '94%' }} />
@@ -431,23 +431,23 @@ export const Farm3DScene: React.FC<{ onExploreClick?: () => void }> = ({ onExplo
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-[11px] font-bold uppercase tracking-wider text-cyan-800 flex items-center gap-1.5">
               <Users className="w-3.5 h-3.5 text-cyan-700" />
-              ACTIVE ECOSYSTEM
+              {t('ACTIVE ECOSYSTEM')}
             </span>
             <span className="text-xs font-bold text-cyan-950 bg-cyan-100 border border-cyan-300 px-2 py-0.5 rounded-full">
-              Verified
+              {t('Verified')}
             </span>
           </div>
           <div className="flex items-baseline justify-between">
             <h4 className="text-xl font-extrabold text-[#064e3b]">25,400+</h4>
-            <span className="text-xs text-cyan-800 font-medium">18,200+ Buyers</span>
+            <span className="text-xs text-cyan-800 font-medium">18,200+ {t('Buyer')}</span>
           </div>
-          <p className="text-[11px] text-[#064e3b70] mt-1">₹145+ Cr Safe Escrow Volume</p>
+          <p className="text-[11px] text-[#064e3b70] mt-1">{t('₹145+ Cr Safe Escrow Volume')}</p>
         </motion.div>
       </div>
 
       {/* Subtle Hint on bottom center */}
       <div className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[10px] text-emerald-900 font-medium tracking-wide uppercase pointer-events-none hidden md:block">
-        Move cursor to inspect 3D agricultural terrain & crop canopy
+        {t('Move cursor to inspect 3D agricultural terrain & crop canopy')}
       </div>
     </div>
   );
