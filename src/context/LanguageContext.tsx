@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { LanguageCode } from '../types';
 import { LANGUAGES, translations } from '../i18n/translations';
 import { PHRASE_DICTIONARY } from '../i18n/dictionary';
+import { COMPREHENSIVE_PHRASES, WORD_DICTIONARY } from '../i18n/comprehensiveDictionary';
 
 interface LanguageContextType {
   language: LanguageCode;
@@ -32,18 +33,23 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Compile combined dictionary lookup map for current language
   const activeDictionary = useMemo(() => {
     const combined: Record<string, string> = {};
-    
-    // 1. Base key translations
+
+    // 1. Base key translations from translations.ts
     if (translations[language]) {
       Object.assign(combined, translations[language]);
     }
-    
-    // 2. Phrase dictionary
+
+    // 2. Phrase dictionary from dictionary.ts
     if (PHRASE_DICTIONARY[language]) {
       Object.assign(combined, PHRASE_DICTIONARY[language]);
     }
 
-    // 3. Reverse map English keys from translations.en -> language translations
+    // 3. Comprehensive phrases from comprehensiveDictionary.ts
+    if (COMPREHENSIVE_PHRASES[language]) {
+      Object.assign(combined, COMPREHENSIVE_PHRASES[language]);
+    }
+
+    // 4. Reverse map English keys from translations.en -> language translations
     if (translations.en && translations[language]) {
       Object.entries(translations.en).forEach(([k, enVal]) => {
         if (translations[language][k]) {
@@ -53,7 +59,7 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       });
     }
 
-    // 4. Reverse map English phrases from PHRASE_DICTIONARY.en -> language
+    // 5. Reverse map English phrases from PHRASE_DICTIONARY.en -> language
     if (PHRASE_DICTIONARY.en && PHRASE_DICTIONARY[language]) {
       Object.entries(PHRASE_DICTIONARY.en).forEach(([enKey, enVal]) => {
         if (PHRASE_DICTIONARY[language][enKey]) {
@@ -63,95 +69,131 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       });
     }
 
+    // 6. Reverse map from COMPREHENSIVE_PHRASES.en -> language
+    if (COMPREHENSIVE_PHRASES.en && COMPREHENSIVE_PHRASES[language]) {
+      Object.entries(COMPREHENSIVE_PHRASES.en).forEach(([enKey, enVal]) => {
+        if (COMPREHENSIVE_PHRASES[language][enKey]) {
+          combined[enVal] = COMPREHENSIVE_PHRASES[language][enKey];
+          combined[enVal.toLowerCase()] = COMPREHENSIVE_PHRASES[language][enKey];
+        }
+      });
+    }
+
+    // 7. Also make sure all direct English keys in COMPREHENSIVE_PHRASES[language] have lowercase entries
+    if (COMPREHENSIVE_PHRASES[language]) {
+      Object.entries(COMPREHENSIVE_PHRASES[language]).forEach(([enPhrase, localizedPhrase]) => {
+        if (localizedPhrase) {
+          combined[enPhrase] = String(localizedPhrase);
+          combined[enPhrase.toLowerCase()] = String(localizedPhrase);
+        }
+      });
+    }
+
     return combined;
   }, [language]);
 
-  // Primary translation function
-  const t = useCallback(
-    (keyOrPhrase: string, fallback?: string): string => {
-      if (!keyOrPhrase) return fallback || '';
-      const trimmed = keyOrPhrase.trim();
+  // Pre-sorted list of phrase keys (longest first) to prevent premature substrings from replacing first
+  const sortedPhrases = useMemo(() => {
+    return Object.keys(activeDictionary)
+      .filter((k) => k && k.length > 1 && !/^[0-9\s.,/\\()\-:;%₹+]+$/.test(k))
+      .sort((a, b) => b.length - a.length);
+  }, [activeDictionary]);
 
-      // Direct match
-      if (activeDictionary[keyOrPhrase]) {
-        return activeDictionary[keyOrPhrase];
-      }
+  // Active single-word fallback dictionary
+  const activeWordDictionary = useMemo(() => {
+    return WORD_DICTIONARY[language] || {};
+  }, [language]);
+
+  // Primary translation engine function
+  const translateString = useCallback(
+    (str: string): string => {
+      if (!str || str.trim().length === 0) return str;
+      if (language === 'en') return str;
+
+      const trimmed = str.trim();
+
+      // 1. Exact match in combined dictionary
       if (activeDictionary[trimmed]) {
-        return activeDictionary[trimmed];
+        return str.replace(trimmed, String(activeDictionary[trimmed]));
       }
-
-      // Check lowercase
       const lower = trimmed.toLowerCase();
       if (activeDictionary[lower]) {
-        return activeDictionary[lower];
+        return str.replace(trimmed, String(activeDictionary[lower]));
       }
 
-      // If English, return original or fallback
-      if (language === 'en') {
-        return fallback || keyOrPhrase;
-      }
+      // 2. Sequential multi-phrase replacement (from longest phrase to shortest)
+      let result = str;
+      let hasReplaced = false;
 
-      // Smart phrase & unit substitution for common agricultural metrics
-      let result = trimmed;
-      let replaced = false;
-
-      // Common word replacements in Kannada & other languages
-      const wordReplacements: [RegExp, string][] = language === 'kn' ? [
-        [/\/kg\b/gi, '/ಕೆ.ಜಿ.'],
-        [/\bper kg\b/gi, 'ಪ್ರತಿ ಕೆ.ಜಿ.'],
-        [/\bTons\b/gi, 'ಟನ್‌ಗಳು'],
-        [/\bTon\b/gi, 'ಟನ್'],
-        [/\bQuintal\b/gi, 'ಕ್ವಿಂಟಾಲ್'],
-        [/\bQuintals\b/gi, 'ಕ್ವಿಂಟಾಲ್‌ಗಳು'],
-        [/\bGrade A\b/gi, 'ಗ್ರೇಡ್ ಎ'],
-        [/\bGrade B\b/gi, 'ಗ್ರೇಡ್ ಬಿ'],
-        [/\bGrade C\b/gi, 'ಗ್ರೇಡ್ ಸಿ'],
-        [/\bOrganic\b/gi, 'ಸಾವಯವ'],
-        [/\bVerified\b/gi, 'ದೃಢೀಕರಿಸಲಾಗಿದೆ'],
-        [/\bPending\b/gi, 'ಬಾಕಿ ಉಳಿದಿದೆ'],
-        [/\bApproved\b/gi, 'ಅನುಮೋದಿಸಲಾಗಿದೆ'],
-        [/\bRejected\b/gi, 'ತಿರಸ್ಕರಿಸಲಾಗಿದೆ'],
-        [/\bCompleted\b/gi, 'ಪೂರ್ಣಗೊಂಡಿದೆ'],
-        [/\bActive\b/gi, 'ಸಕ್ರಿಯ'],
-        [/\bFarmer\b/gi, 'ರೈತ'],
-        [/\bBuyer\b/gi, 'ಖರೀದಿದಾರ'],
-        [/\bAdmin\b/gi, 'ಆಡಳಿತಾಧಿಕಾರಿ'],
-        [/\bMandi\b/gi, 'ಮಂಡಿ'],
-        [/\bScore\b/gi, 'ಅಂಕ'],
-        [/\bPrice\b/gi, 'ಬೆಲೆ'],
-        [/\bQuantity\b/gi, 'ಪ್ರಮಾಣ'],
-        [/\bStatus\b/gi, 'ಸ್ಥಿತಿ'],
-        [/\bTotal\b/gi, 'ಒಟ್ಟು'],
-      ] : language === 'hi' ? [
-        [/\/kg\b/gi, '/कि.ग्रा.'],
-        [/\bper kg\b/gi, 'प्रति कि.ग्रा.'],
-        [/\bTons\b/gi, 'टन'],
-        [/\bQuintal\b/gi, 'क्विंटल'],
-        [/\bGrade A\b/gi, 'ग्रेड ए'],
-        [/\bGrade B\b/gi, 'ग्रेड बी'],
-        [/\bGrade C\b/gi, 'ग्रेड सी'],
-        [/\bOrganic\b/gi, 'जैविक'],
-        [/\bVerified\b/gi, 'सत्यापित'],
-        [/\bPending\b/gi, 'लंबित'],
-        [/\bApproved\b/gi, 'स्वीकृत'],
-        [/\bFarmer\b/gi, 'किसान'],
-        [/\bBuyer\b/gi, 'खरीदार'],
-      ] : [];
-
-      for (const [pattern, replacement] of wordReplacements) {
-        if (pattern.test(result)) {
-          result = result.replace(pattern, replacement);
-          replaced = true;
+      for (const phraseKey of sortedPhrases) {
+        if (phraseKey.length > 1 && result.includes(phraseKey)) {
+          const localized = activeDictionary[phraseKey];
+          if (localized && localized !== phraseKey) {
+            result = result.split(phraseKey).join(localized);
+            hasReplaced = true;
+          }
         }
       }
 
-      if (replaced) {
-        return result;
+      // 3. Smart metric & unit replacements (like /kg, per kg, Tons, etc.)
+      const unitMap: [RegExp, string][] =
+        language === 'kn'
+          ? [
+              [/\/kg\b/gi, '/ಕೆ.ಜಿ.'],
+              [/\bper kg\b/gi, 'ಪ್ರತಿ ಕೆ.ಜಿ.'],
+              [/\bTons\b/gi, 'ಟನ್‌ಗಳು'],
+              [/\bTon\b/gi, 'ಟನ್'],
+              [/\bQuintal\b/gi, 'ಕ್ವಿಂಟಾಲ್'],
+              [/\bQuintals\b/gi, 'ಕ್ವಿಂಟಾಲ್‌ಗಳು'],
+            ]
+          : language === 'hi'
+          ? [
+              [/\/kg\b/gi, '/कि.ग्रा.'],
+              [/\bper kg\b/gi, 'प्रति कि.ग्रा.'],
+              [/\bTons\b/gi, 'टन'],
+              [/\bQuintal\b/gi, 'क्विंटल'],
+            ]
+          : [];
+
+      for (const [pattern, replacement] of unitMap) {
+        if (pattern.test(result)) {
+          result = result.replace(pattern, replacement);
+          hasReplaced = true;
+        }
       }
 
-      return fallback || keyOrPhrase;
+      // 4. Word-level token translation for any remaining English words
+      result = result.replace(/\b[A-Za-z][A-Za-z0-9'-]*\b/g, (match) => {
+        if (activeWordDictionary[match]) {
+          hasReplaced = true;
+          return activeWordDictionary[match];
+        }
+        const matchLower = match.toLowerCase();
+        if (activeWordDictionary[matchLower]) {
+          hasReplaced = true;
+          return activeWordDictionary[matchLower];
+        }
+        const cap = match.charAt(0).toUpperCase() + match.slice(1).toLowerCase();
+        if (activeWordDictionary[cap]) {
+          hasReplaced = true;
+          return activeWordDictionary[cap];
+        }
+        return match;
+      });
+
+      return hasReplaced ? result : str;
     },
-    [activeDictionary, language]
+    [activeDictionary, activeWordDictionary, language, sortedPhrases]
+  );
+
+  // Hook-level t() function
+  const t = useCallback(
+    (keyOrPhrase: string, fallback?: string): string => {
+      if (!keyOrPhrase) return fallback || '';
+      if (language === 'en') return fallback || keyOrPhrase;
+      return translateString(keyOrPhrase) || fallback || keyOrPhrase;
+    },
+    [language, translateString]
   );
 
   const currentLanguageConfig = LANGUAGES.find((l) => l.code === language) || LANGUAGES[0];
@@ -162,29 +204,8 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     if (typeof window === 'undefined') return;
 
-    // Helper to translate single text content
-    const translateString = (str: string): string => {
-      if (!str || str.trim().length === 0) return str;
-      const trimmed = str.trim();
-
-      // Check direct dictionary match
-      if (activeDictionary[trimmed]) {
-        return str.replace(trimmed, String(activeDictionary[trimmed]));
-      }
-
-      // Check phrase dictionary entries
-      for (const [enKey, localizedVal] of Object.entries(activeDictionary)) {
-        if (enKey.length > 2 && typeof localizedVal === 'string' && trimmed.includes(enKey)) {
-          return str.replace(enKey, localizedVal);
-        }
-      }
-
-      return t(trimmed, str);
-    };
-
-    // Recursive node walker
+    // Recursive node processor
     const processNode = (node: Node) => {
-      // Skip scripts, styles, pre, code, and active editable text areas
       const parent = node.parentElement;
       if (
         parent &&
@@ -192,7 +213,9 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           parent.tagName === 'STYLE' ||
           parent.tagName === 'NOSCRIPT' ||
           parent.isContentEditable ||
-          (parent.tagName === 'INPUT' && (parent as HTMLInputElement).type !== 'button' && (parent as HTMLInputElement).type !== 'submit'))
+          (parent.tagName === 'INPUT' &&
+            (parent as HTMLInputElement).type !== 'button' &&
+            (parent as HTMLInputElement).type !== 'submit'))
       ) {
         return;
       }
@@ -203,6 +226,19 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         if (original === undefined) {
           original = node.nodeValue || '';
           nodeOriginalTextMap.set(node, original);
+        } else {
+          // If the nodeValue changed dynamically by React and contains English
+          const currentTrans = language === 'en' ? original : translateString(original);
+          if (
+            node.nodeValue !== currentTrans &&
+            node.nodeValue !== original &&
+            node.nodeValue &&
+            node.nodeValue.trim().length > 0 &&
+            /[A-Za-z]/.test(node.nodeValue)
+          ) {
+            original = node.nodeValue;
+            nodeOriginalTextMap.set(node, original);
+          }
         }
 
         if (language === 'en') {
@@ -211,7 +247,7 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           }
         } else {
           const translated = translateString(original);
-          if (translated !== node.nodeValue && translated !== original) {
+          if (translated !== node.nodeValue) {
             node.nodeValue = translated;
           }
         }
@@ -229,10 +265,12 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             elementOriginalPlaceholders.set(el, origPlaceholder);
           }
           if (language === 'en') {
-            el.setAttribute('placeholder', origPlaceholder);
+            if (el.getAttribute('placeholder') !== origPlaceholder) {
+              el.setAttribute('placeholder', origPlaceholder);
+            }
           } else {
             const trans = translateString(origPlaceholder);
-            if (trans !== origPlaceholder) {
+            if (el.getAttribute('placeholder') !== trans) {
               el.setAttribute('placeholder', trans);
             }
           }
@@ -246,11 +284,32 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             elementOriginalTitles.set(el, origTitle);
           }
           if (language === 'en') {
-            el.setAttribute('title', origTitle);
+            if (el.getAttribute('title') !== origTitle) {
+              el.setAttribute('title', origTitle);
+            }
           } else {
             const trans = translateString(origTitle);
-            if (trans !== origTitle) {
+            if (el.getAttribute('title') !== trans) {
               el.setAttribute('title', trans);
+            }
+          }
+        }
+
+        // Button/Submit inputs
+        if (
+          el.tagName === 'INPUT' &&
+          ((el as HTMLInputElement).type === 'button' || (el as HTMLInputElement).type === 'submit')
+        ) {
+          const inputEl = el as HTMLInputElement;
+          const val = inputEl.value;
+          if (val) {
+            if (language === 'en') {
+              // preserve
+            } else {
+              const trans = translateString(val);
+              if (trans !== val) {
+                inputEl.value = trans;
+              }
             }
           }
         }
@@ -293,7 +352,7 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return () => {
       observer.disconnect();
     };
-  }, [language, activeDictionary, t]);
+  }, [language, translateString]);
 
   return (
     <LanguageContext.Provider
@@ -317,4 +376,3 @@ export const useLanguage = () => {
   }
   return context;
 };
-

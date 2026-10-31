@@ -13,11 +13,13 @@ import {
   NotificationItem,
   KYCRequest,
   DisputeItem,
+  AgmarknetSyncConfig,
 } from '../types';
 
 interface StoreContextType {
   crops: CropListing[];
   mandiPrices: MandiPriceItem[];
+  agmarknetConfig: AgmarknetSyncConfig;
   orders: OrderItem[];
   buyerRequirements: BuyerRequirement[];
   reverseBids: ReverseBid[];
@@ -32,6 +34,8 @@ interface StoreContextType {
   disputes: DisputeItem[];
 
   // Actions
+  refreshMandiPrices: () => Promise<void>;
+  syncAgmarknet: (apiKey?: string) => Promise<boolean>;
   addCrop: (crop: Omit<CropListing, 'id' | 'status'>) => void;
   updateCrop: (id: string, crop: Partial<CropListing>) => void;
   deleteCrop: (id: string) => void;
@@ -909,6 +913,65 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   });
 
+  const [agmarknetConfig, setAgmarknetConfig] = useState<AgmarknetSyncConfig>({
+    apiKey: 'DEMO-DATA-GOV-IN-AGRI-2026',
+    source: 'data.gov.in (Agmarknet e-NAM Feed)',
+    lastSyncedAt: 'Today 09:30 AM',
+    status: 'Connected',
+    totalRecordsLoaded: 48,
+    resourceId: '9ef84268-d588-465a-a308-a864a43d0070',
+  });
+
+  const refreshMandiPrices = async () => {
+    try {
+      const res = await fetch('/api/mandi/prices');
+      if (res.ok) {
+        const data = await res.json();
+        if (data && Array.isArray(data.prices) && data.prices.length > 0) {
+          setMandiPrices(data.prices);
+          localStorage.setItem('agritech_mandi', JSON.stringify(data.prices));
+        }
+      }
+    } catch (e) {
+      console.warn('Refresh mandi prices error:', e);
+    }
+  };
+
+  const syncAgmarknet = async (apiKey?: string): Promise<boolean> => {
+    try {
+      setAgmarknetConfig((prev) => ({ ...prev, status: 'Syncing' }));
+      const keyToUse = apiKey || agmarknetConfig.apiKey || 'DEMO-DATA-GOV-IN-AGRI-2026';
+      const res = await fetch('/api/agmarknet/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: keyToUse, resourceId: agmarknetConfig.resourceId }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.syncConfig) {
+          setAgmarknetConfig(data.syncConfig);
+        }
+        await refreshMandiPrices();
+        addNotification({
+          title: 'e-Agmarknet Mandi Feed Synced',
+          message: 'Real-time arrival and modal price records updated from data.gov.in official repository.',
+          type: 'price',
+          targetRole: 'farmer',
+        });
+        return true;
+      }
+      setAgmarknetConfig((prev) => ({ ...prev, status: 'Connected' }));
+      return false;
+    } catch {
+      setAgmarknetConfig((prev) => ({ ...prev, status: 'Connected' }));
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    refreshMandiPrices();
+  }, []);
+
   const [orders, setOrders] = useState<OrderItem[]>(() => {
     try {
       const saved = localStorage.getItem('agritech_orders');
@@ -1216,6 +1279,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       value={{
         crops,
         mandiPrices,
+        agmarknetConfig,
+        refreshMandiPrices,
+        syncAgmarknet,
         orders,
         buyerRequirements,
         reverseBids,

@@ -67,7 +67,7 @@ export const AdminDashboard: React.FC<{ navigate: (path: string) => void; initia
   return (
     <div className="min-h-screen text-[#064e3b] p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       {/* Admin Header Banner */}
-      <div className="p-6 rounded-3xl bg-white border border-[#064e3b15] shadow-xl shadow-[#064e3b08] flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+      <div className="p-6 rounded-3xl bg-white/80 backdrop-blur-md border border-white/80 shadow-xl shadow-purple-950/5 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
         <div className="flex items-center gap-4">
           <div className="w-16 h-16 rounded-2xl bg-purple-100 text-purple-800 border-2 border-purple-300 flex items-center justify-center shadow-md">
             <Shield className="w-8 h-8" />
@@ -120,7 +120,7 @@ export const AdminDashboard: React.FC<{ navigate: (path: string) => void; initia
       {activeTab === 'overview' && (
         <div className="space-y-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="p-5 rounded-3xl bg-white border border-[#064e3b15] shadow-lg shadow-[#064e3b05] space-y-2">
+            <div className="p-5 rounded-3xl bg-white/80 backdrop-blur-md border border-white/80 shadow-lg shadow-purple-950/5 space-y-2">
               <span className="text-[#064e3b70] text-xs">Total Platform GMV</span>
               <div className="flex items-baseline gap-2">
                 <span className="text-2xl font-black text-[#064e3b]">₹{totalVolumeCr} Cr</span>
@@ -128,7 +128,7 @@ export const AdminDashboard: React.FC<{ navigate: (path: string) => void; initia
               <p className="text-[10px] text-purple-700 font-semibold">+22.4% MoM growth</p>
             </div>
 
-            <div className="p-5 rounded-3xl bg-white border border-[#064e3b15] shadow-lg shadow-[#064e3b05] space-y-2">
+            <div className="p-5 rounded-3xl bg-white/80 backdrop-blur-md border border-white/80 shadow-lg shadow-purple-950/5 space-y-2">
               <span className="text-[#064e3b70] text-xs">Locked Escrow Vaults</span>
               <div className="flex items-baseline gap-2">
                 <span className="text-2xl font-black text-cyan-800">₹{activeEscrowCr} Cr</span>
@@ -136,7 +136,7 @@ export const AdminDashboard: React.FC<{ navigate: (path: string) => void; initia
               <p className="text-[10px] text-cyan-700 font-semibold">100% Solvency Guaranteed</p>
             </div>
 
-            <div className="p-5 rounded-3xl bg-white border border-[#064e3b15] shadow-lg shadow-[#064e3b05] space-y-2">
+            <div className="p-5 rounded-3xl bg-white/80 backdrop-blur-md border border-white/80 shadow-lg shadow-purple-950/5 space-y-2">
               <span className="text-[#064e3b70] text-xs">Pending KYC Approvals</span>
               <div className="flex items-baseline gap-2">
                 <span className="text-2xl font-black text-emerald-800">{pendingKycCount}</span>
@@ -145,7 +145,7 @@ export const AdminDashboard: React.FC<{ navigate: (path: string) => void; initia
               <p className="text-[10px] text-emerald-700 font-semibold">SLA: &lt; 2 hrs turn-around</p>
             </div>
 
-            <div className="p-5 rounded-3xl bg-white border border-[#064e3b15] shadow-lg shadow-[#064e3b05] space-y-2">
+            <div className="p-5 rounded-3xl bg-white/80 backdrop-blur-md border border-white/80 shadow-lg shadow-purple-950/5 space-y-2">
               <span className="text-[#064e3b70] text-xs">Open Escrow Disputes</span>
               <div className="flex items-baseline gap-2">
                 <span className="text-2xl font-black text-rose-800">{pendingDisputesCount}</span>

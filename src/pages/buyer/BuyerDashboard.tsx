@@ -168,7 +168,7 @@ export const BuyerDashboard: React.FC<{ navigate: (path: string) => void; initia
   return (
     <div className="min-h-screen text-[#064e3b] p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       {/* Buyer Profile Header */}
-      <div className="p-6 rounded-3xl bg-white border border-[#064e3b15] shadow-xl shadow-[#064e3b08] flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+      <div className="p-6 rounded-3xl bg-white/80 backdrop-blur-md border border-white/80 shadow-xl shadow-cyan-950/5 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
         <div className="flex items-center gap-4">
           <img
             src={user?.avatar || 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80'}
@@ -236,7 +236,7 @@ export const BuyerDashboard: React.FC<{ navigate: (path: string) => void; initia
         <div className="space-y-6">
           {/* Top 4 KPI Metrics */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="p-5 rounded-3xl bg-white border border-[#064e3b15] shadow-lg shadow-[#064e3b05] space-y-2">
+            <div className="p-5 rounded-3xl bg-white/80 backdrop-blur-md border border-white/80 shadow-lg shadow-cyan-950/5 space-y-2">
               <div className="flex items-center justify-between text-[#064e3b70] text-xs">
                 <span>Total Procured Volume</span>
                 <Package className="w-4 h-4 text-cyan-700" />
@@ -248,7 +248,7 @@ export const BuyerDashboard: React.FC<{ navigate: (path: string) => void; initia
               <p className="text-[10px] text-emerald-700 font-semibold">Average savings vs Mandi: 14.8%</p>
             </div>
 
-            <div className="p-5 rounded-3xl bg-white border border-[#064e3b15] shadow-lg shadow-[#064e3b05] space-y-2">
+            <div className="p-5 rounded-3xl bg-white/80 backdrop-blur-md border border-white/80 shadow-lg shadow-cyan-950/5 space-y-2">
               <div className="flex items-center justify-between text-[#064e3b70] text-xs">
                 <span>Active Escrow Protected</span>
                 <ShieldCheck className="w-4 h-4 text-emerald-700" />
@@ -260,7 +260,7 @@ export const BuyerDashboard: React.FC<{ navigate: (path: string) => void; initia
               <p className="text-[10px] text-[#064e3b70]">Locked until QA sign-off</p>
             </div>
 
-            <div className="p-5 rounded-3xl bg-white border border-[#064e3b15] shadow-lg shadow-[#064e3b05] space-y-2">
+            <div className="p-5 rounded-3xl bg-white/80 backdrop-blur-md border border-white/80 shadow-lg shadow-cyan-950/5 space-y-2">
               <div className="flex items-center justify-between text-[#064e3b70] text-xs">
                 <span>Cumulative Spend</span>
                 <DollarSign className="w-4 h-4 text-amber-600" />
@@ -272,7 +272,7 @@ export const BuyerDashboard: React.FC<{ navigate: (path: string) => void; initia
               <p className="text-[10px] text-[#064e3b70]">{myOrders.length} verified trade contracts</p>
             </div>
 
-            <div className="p-5 rounded-3xl bg-white border border-[#064e3b15] shadow-lg shadow-[#064e3b05] space-y-2">
+            <div className="p-5 rounded-3xl bg-white/80 backdrop-blur-md border border-white/80 shadow-lg shadow-cyan-950/5 space-y-2">
               <div className="flex items-center justify-between text-[#064e3b70] text-xs">
                 <span>Active Group Pools</span>
                 <Users className="w-4 h-4 text-purple-700" />
@@ -303,7 +303,7 @@ export const BuyerDashboard: React.FC<{ navigate: (path: string) => void; initia
               {crops.slice(0, 3).map((crop) => (
                 <div
                   key={crop.id}
-                  className="bg-white rounded-3xl border border-[#064e3b15] hover:border-emerald-500/40 p-4 space-y-3 transition-all shadow-md shadow-[#064e3b05]"
+                  className="bg-white/80 backdrop-blur-md rounded-3xl border border-white/80 hover:border-emerald-500/40 p-4 space-y-3 transition-all shadow-md shadow-cyan-950/5"
                 >
                   <div className="relative h-40 rounded-2xl overflow-hidden bg-gray-100">
                     <img src={crop.images[0]} alt={crop.cropName} className="w-full h-full object-cover" />
@@ -351,7 +351,7 @@ export const BuyerDashboard: React.FC<{ navigate: (path: string) => void; initia
       {activeTab === 'marketplace' && (
         <div className="space-y-6">
           {/* Filters Bar */}
-          <div className="p-4 rounded-3xl bg-white border border-[#064e3b15] shadow-md shadow-[#064e3b05] space-y-4">
+          <div className="p-4 rounded-3xl bg-white/80 backdrop-blur-md border border-white/80 shadow-md shadow-cyan-950/5 space-y-4">
             <div className="flex flex-col sm:flex-row gap-3">
               <div className="relative flex-1">
                 <Search className="w-4 h-4 text-[#064e3b60] absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -405,7 +405,7 @@ export const BuyerDashboard: React.FC<{ navigate: (path: string) => void; initia
               return (
                 <div
                   key={crop.id}
-                  className="bg-white rounded-3xl border border-[#064e3b15] hover:border-emerald-500/50 p-5 space-y-4 transition-all shadow-lg shadow-[#064e3b05] flex flex-col justify-between"
+                  className="bg-white/80 backdrop-blur-md rounded-3xl border border-white/80 hover:border-emerald-500/50 p-5 space-y-4 transition-all shadow-lg shadow-cyan-950/5 flex flex-col justify-between"
                 >
                   <div className="space-y-3">
                     <div className="relative h-48 rounded-2xl overflow-hidden bg-gray-100">

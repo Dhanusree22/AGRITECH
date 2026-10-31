@@ -54,7 +54,7 @@ export const MarketplacePage: React.FC<{ navigate: (path: string) => void }> = (
       </div>
 
       {/* Filter and Search Controls */}
-      <div className="p-4 sm:p-6 rounded-3xl bg-white border border-[#064e3b15] shadow-lg shadow-[#064e3b05] space-y-4">
+      <div className="p-4 sm:p-6 rounded-3xl bg-white/80 backdrop-blur-md border border-white/80 shadow-xl shadow-emerald-950/5 space-y-4">
         <div className="flex flex-col md:flex-row gap-3">
           <div className="relative flex-1">
             <Search className="w-4 h-4 text-[#064e3b60] absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -118,7 +118,7 @@ export const MarketplacePage: React.FC<{ navigate: (path: string) => void }> = (
           <motion.div
             key={crop.id}
             whileHover={{ y: -4 }}
-            className="bg-white rounded-3xl border border-[#064e3b15] hover:border-emerald-500/50 p-5 space-y-4 transition-all shadow-xl shadow-[#064e3b08] flex flex-col justify-between"
+            className="bg-white/80 backdrop-blur-md rounded-3xl border border-white/80 hover:border-emerald-500/50 hover:bg-white/90 p-5 space-y-4 transition-all shadow-xl shadow-emerald-950/5 flex flex-col justify-between"
           >
             <div className="space-y-3">
               <div className="relative h-48 rounded-2xl overflow-hidden bg-gray-100">

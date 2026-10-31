@@ -74,6 +74,31 @@ export interface MandiPriceItem {
   ai7DayForecastPerKg: number;
   ai30DayForecastPerKg: number;
   confidence: number;
+  season?: string;
+  weatherFactor?: string;
+  holidayImpact?: string;
+}
+
+export interface DailyForecastPoint {
+  dayIndex: number;
+  dateStr: string;
+  dayLabel: string;
+  predictedPrice: number;
+  minRange: number;
+  maxRange: number;
+  trend: 'up' | 'down' | 'stable';
+  confidenceScore: number;
+  holidayOrEvent?: string;
+  climateFactor?: string;
+}
+
+export interface AgmarknetSyncConfig {
+  apiKey: string;
+  source: string;
+  lastSyncedAt: string;
+  status: 'Connected' | 'Syncing' | 'Offline';
+  totalRecordsLoaded: number;
+  resourceId: string;
 }
 
 export type OrderStatus = 'Pending' | 'Confirmed' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled';

@@ -172,7 +172,7 @@ export const FarmerDashboard: React.FC<{ navigate: (path: string) => void; initi
   return (
     <div className="min-h-screen text-[#064e3b] p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       {/* Farmer Profile Header Banner */}
-      <div className="p-6 rounded-3xl bg-white border border-[#064e3b15] shadow-xl shadow-[#064e3b08] flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+      <div className="p-6 rounded-3xl bg-white/80 backdrop-blur-md border border-white/80 shadow-xl shadow-emerald-950/5 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
         <div className="flex items-center gap-4">
           <img
             src={user?.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80'}
@@ -238,7 +238,7 @@ export const FarmerDashboard: React.FC<{ navigate: (path: string) => void; initi
         <div className="space-y-6">
           {/* Top 4 Metric KPI Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="p-5 rounded-3xl bg-white border border-[#064e3b15] shadow-lg shadow-[#064e3b05] space-y-2">
+            <div className="p-5 rounded-3xl bg-white/80 backdrop-blur-md border border-white/80 shadow-lg shadow-emerald-950/5 space-y-2">
               <div className="flex items-center justify-between text-[#064e3b70] text-xs">
                 <span>Total Listed Harvest</span>
                 <Package className="w-4 h-4 text-emerald-700" />
@@ -250,7 +250,7 @@ export const FarmerDashboard: React.FC<{ navigate: (path: string) => void; initi
               <p className="text-[10px] text-emerald-700 font-semibold">94% AI Quality Grade Average</p>
             </div>
 
-            <div className="p-5 rounded-3xl bg-white border border-[#064e3b15] shadow-lg shadow-[#064e3b05] space-y-2">
+            <div className="p-5 rounded-3xl bg-white/80 backdrop-blur-md border border-white/80 shadow-lg shadow-emerald-950/5 space-y-2">
               <div className="flex items-center justify-between text-[#064e3b70] text-xs">
                 <span>Escrow Secured Payments</span>
                 <ShieldCheck className="w-4 h-4 text-cyan-700" />
@@ -262,7 +262,7 @@ export const FarmerDashboard: React.FC<{ navigate: (path: string) => void; initi
               <p className="text-[10px] text-[#064e3b70]">Released upon buyer delivery inspection</p>
             </div>
 
-            <div className="p-5 rounded-3xl bg-white border border-[#064e3b15] shadow-lg shadow-[#064e3b05] space-y-2">
+            <div className="p-5 rounded-3xl bg-white/80 backdrop-blur-md border border-white/80 shadow-lg shadow-emerald-950/5 space-y-2">
               <div className="flex items-center justify-between text-[#064e3b70] text-xs">
                 <span>Cumulative Revenue</span>
                 <DollarSign className="w-4 h-4 text-amber-600" />
@@ -274,7 +274,7 @@ export const FarmerDashboard: React.FC<{ navigate: (path: string) => void; initi
               <p className="text-[10px] text-[#064e3b70]">{orders.length} total direct fulfilled orders</p>
             </div>
 
-            <div className="p-5 rounded-3xl bg-white border border-[#064e3b15] shadow-lg shadow-[#064e3b05] space-y-2">
+            <div className="p-5 rounded-3xl bg-white/80 backdrop-blur-md border border-white/80 shadow-lg shadow-emerald-950/5 space-y-2">
               <div className="flex items-center justify-between text-[#064e3b70] text-xs">
                 <span>Estimated Net Profit</span>
                 <TrendingUp className="w-4 h-4 text-purple-700" />
@@ -305,7 +305,7 @@ export const FarmerDashboard: React.FC<{ navigate: (path: string) => void; initi
               {myCrops.map((crop) => (
                 <div
                   key={crop.id}
-                  className="bg-white rounded-3xl border border-[#064e3b15] hover:border-emerald-500/40 p-4 space-y-3 transition-all shadow-md shadow-[#064e3b05]"
+                  className="bg-white/80 backdrop-blur-md rounded-3xl border border-white/80 hover:border-emerald-500/40 p-4 space-y-3 transition-all shadow-md shadow-emerald-950/5"
                 >
                   <div className="relative h-40 rounded-2xl overflow-hidden bg-gray-100">
                     <img src={crop.images[0]} alt={crop.cropName} className="w-full h-full object-cover" />
@@ -368,7 +368,7 @@ export const FarmerDashboard: React.FC<{ navigate: (path: string) => void; initi
             </button>
           </div>
 
-          <div className="overflow-x-auto rounded-3xl border border-[#064e3b15] bg-white shadow-md shadow-[#064e3b05]">
+          <div className="overflow-x-auto rounded-3xl border border-white/80 bg-white/85 backdrop-blur-md shadow-md shadow-emerald-950/5">
             <table className="w-full text-left text-xs text-[#064e3b]">
               <thead className="bg-[#f1f5f2] text-[#064e3b80] uppercase text-[10px] border-b border-[#064e3b10]">
                 <tr>

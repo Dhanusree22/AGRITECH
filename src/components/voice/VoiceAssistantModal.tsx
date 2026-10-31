@@ -1,6 +1,22 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Mic, MicOff, Volume2, VolumeX, Sparkles, X, Send, Bot, Check, RotateCcw, Sliders, Globe } from 'lucide-react';
+import {
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
+  Sparkles,
+  X,
+  Send,
+  Bot,
+  Check,
+  RotateCcw,
+  Sliders,
+  Globe,
+  Radio,
+  AlertCircle,
+  HelpCircle,
+} from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useAuth } from '../../context/AuthContext';
 import { LanguageCode } from '../../types';
@@ -17,23 +33,30 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
   const [isListening, setIsListening] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [transcript, setTranscript] = useState('');
   const [autoSpeak, setAutoSpeak] = useState(true);
   const [voiceEngine, setVoiceEngine] = useState<'cloud' | 'browser'>('cloud');
   const [speechSpeed, setSpeechSpeed] = useState<number>(1.0);
   const [inputText, setInputText] = useState('');
+  const [micErrorMessage, setMicErrorMessage] = useState<string>('');
   const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedVoiceURI, setSelectedVoiceURI] = useState<string>('');
   const [showSettings, setShowSettings] = useState(false);
 
-  const getInitialGreeting = (lang: LanguageCode) => {
+  const recognitionRef = useRef<any>(null);
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+  const synthRef = useRef<SpeechSynthesis | null>(null);
+  const chatBottomRef = useRef<HTMLDivElement>(null);
+
+  const getInitialGreeting = useCallback((lang: LanguageCode) => {
     switch (lang) {
       case 'kn':
-        return 'ನಮಸ್ಕಾರ! ನಾನು ಅಗ್ರಿಟೆಕ್ ಕೃಷಿ AI ಧ್ವನಿ ಸಹಾಯಕ. ನೀವು ಮಂಡಿ ದರಗಳು, ಹವಾಮಾನ, ಬೆಳೆ ರೋಗಗಳ ನಿವಾರಣೆ, ಸರ್ಕಾರಿ ಸಹಾಯಧನ ಅಥವಾ ಸಗಟು ಖರೀದಿದಾರರ ಬಗ್ಗೆ ಕನ್ನಡದಲ್ಲೇ ಮಾತನಾಡಿ ಕೇಳಬಹುದು.';
+        return 'ನಮಸ್ಕಾರ! ನಾನು ಅಗ್ರಿಟೆಕ್ ಕೃಷಿ AI ಧ್ವನಿ ಸಹಾಯಕ. ನೀವು ಮಂಡಿ ದರಗಳು, ನಾಳೆಯ ಬೆಲೆ ಮುನ್ಸೂಚನೆ, ಹವಾಮಾನ, ಬೆಳೆ ರೋಗಗಳ ನಿವಾರಣೆ ಅಥವಾ ಖರೀದಿದಾರರ ಬಗ್ಗೆ ಕನ್ನಡದಲ್ಲೇ ಮಾತನಾಡಿ ಕೇಳಬಹುದು.';
       case 'hi':
-        return 'नमस्ते! मैं एग्रीटेक कृषि AI वॉइस असिस्टेंट हूँ। आप मंडी भाव, मौसम, फसल सुरक्षा या खरीदारों के बारे में हिंदी में बात करके पूछ सकते हैं।';
+        return 'नमस्ते! मैं एग्रीटेक कृषि AI वॉइस असिस्टेंट हूँ। आप मंडी भाव, कल का मूल्य पूर्वानुमान, मौसम, फसल सुरक्षा या थोक खरीदारों के बारे में हिंदी में पूछ सकते हैं।';
       case 'te':
-        return 'నమస్కారం! నేను అగ్రిటెక్ వ్యవసాయ AI వాయిస్ అసిస్టెంట్. మార్కెట్ ధరలు, వాతావరణం మరియు కొనుగోలుదారుల గురించి తెలుగులో అడగండి.';
+        return 'నమస్కారం! నేను అగ్రిటెక్ వ్యవసాయ AI వాయిస్ అసిస్టెంట్. మార్కెట్ ధరలు, వాతావరణం ಮತ್ತು కొనుగోలుదారుల గురించి తెలుగులో అడగండి.';
       case 'ta':
         return 'வணக்கம்! நான் அக்ரிடெக் குரல் உதவியாளர். மண்டி விலைகள், பயிர் பாதுகாப்பு மற்றும் வாங்குபவர்கள் பற்றி தமிழில் கேளுங்கள்.';
       case 'ml':
@@ -45,9 +68,9 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
       default:
         return 'Hello! I am AgriAI Voice Assistant. Ask anything about live APMC mandi rates, AI price predictions, crop diseases, institutional buyers, or weather in your language.';
     }
-  };
+  }, []);
 
-  const [messages, setMessages] = useState<Array<{ id: string; sender: 'user' | 'ai'; text: string; time: string }>>([
+  const [messages, setMessages] = useState<Array<{ id: string; sender: 'user' | 'ai'; text: string; time: string }>>(() => [
     {
       id: 'msg-init',
       sender: 'ai',
@@ -56,10 +79,16 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
     },
   ]);
 
-  const recognitionRef = useRef<any>(null);
-  const synthRef = useRef<SpeechSynthesis | null>(null);
-  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
-  const chatBottomRef = useRef<HTMLDivElement>(null);
+  // Prime audio to unlock browser autoplay
+  const primeAudio = () => {
+    try {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.load();
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   // Stop any active speech or audio
   const stopAllAudio = () => {
@@ -67,10 +96,11 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
       audioPlayerRef.current.pause();
       audioPlayerRef.current.currentTime = 0;
     }
-    if (synthRef.current) {
-      synthRef.current.cancel();
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
     }
     setIsSpeaking(false);
+    setSpeakingMessageId(null);
   };
 
   // Load and match SpeechSynthesis voices
@@ -82,7 +112,6 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
         const voices = window.speechSynthesis.getVoices();
         setAvailableVoices(voices);
 
-        // Find voice for current language
         const speechCode = currentLanguageConfig.speechCode.toLowerCase();
         const langShort = currentLanguageConfig.code.toLowerCase();
 
@@ -109,50 +138,14 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
     };
   }, [currentLanguageConfig]);
 
-  // Setup Speech Recognition for active language
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      if (SpeechRecognition) {
-        const recognition = new SpeechRecognition();
-        recognition.continuous = false;
-        recognition.interimResults = true;
-        recognition.lang = currentLanguageConfig.speechCode;
-
-        recognition.onstart = () => {
-          setIsListening(true);
-        };
-
-        recognition.onresult = (event: any) => {
-          let currentTranscript = '';
-          for (let i = event.resultIndex; i < event.results.length; i++) {
-            currentTranscript += event.results[i][0].transcript;
-          }
-          setTranscript(currentTranscript);
-          if (event.results[0]?.isFinal) {
-            handleUserQuery(currentTranscript);
-          }
-        };
-
-        recognition.onerror = (event: any) => {
-          console.warn('Speech recognition error:', event.error);
-          setIsListening(false);
-        };
-
-        recognition.onend = () => {
-          setIsListening(false);
-        };
-
-        recognitionRef.current = recognition;
-      }
-    }
-  }, [currentLanguageConfig]);
-
   // When language is switched in modal, update messages greeting and speak if autoSpeak
   const handleLanguageChange = (newLang: LanguageCode) => {
+    primeAudio();
     setLanguage(newLang);
     stopAllAudio();
+    setMicErrorMessage('');
     const greeting = getInitialGreeting(newLang);
+
     setMessages((prev) => [
       ...prev,
       {
@@ -162,10 +155,11 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       },
     ]);
+
     if (autoSpeak) {
       setTimeout(() => {
         speakText(greeting, newLang);
-      }, 250);
+      }, 200);
     }
   };
 
@@ -182,7 +176,11 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
   };
 
   const speakBrowserUtterance = (cleaned: string, targetLangConfig: any) => {
-    if (!synthRef.current) return;
+    if (!synthRef.current) {
+      setIsSpeaking(false);
+      setSpeakingMessageId(null);
+      return;
+    }
     try {
       const utterance = new SpeechSynthesisUtterance(cleaned);
       utterance.lang = targetLangConfig.speechCode;
@@ -208,20 +206,33 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
       }
 
       utterance.onstart = () => setIsSpeaking(true);
-      utterance.onend = () => setIsSpeaking(false);
-      utterance.onerror = () => setIsSpeaking(false);
+      utterance.onend = () => {
+        setIsSpeaking(false);
+        setSpeakingMessageId(null);
+      };
+      utterance.onerror = () => {
+        setIsSpeaking(false);
+        setSpeakingMessageId(null);
+      };
 
       synthRef.current.speak(utterance);
-    } catch (e) {
-      console.warn('Browser Speech synthesis failed:', e);
+    } catch {
       setIsSpeaking(false);
+      setSpeakingMessageId(null);
     }
   };
 
-  const speakText = (text: string, overrideLang?: LanguageCode) => {
+  const speakText = (text: string, overrideLang?: LanguageCode, messageId?: string) => {
     stopAllAudio();
+    primeAudio();
+
     const cleaned = cleanTextForSpeech(text);
     if (!cleaned) return;
+
+    if (messageId) {
+      setSpeakingMessageId(messageId);
+    }
+    setIsSpeaking(true);
 
     const targetLangCode = overrideLang || language;
     const targetLangConfig = languages.find((l) => l.code === targetLangCode) || currentLanguageConfig;
@@ -229,20 +240,27 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
     if (voiceEngine === 'cloud') {
       try {
         const audioUrl = `/api/tts?text=${encodeURIComponent(cleaned)}&lang=${encodeURIComponent(targetLangCode)}`;
-        const audio = new Audio(audioUrl);
-        audio.playbackRate = speechSpeed;
-        audioPlayerRef.current = audio;
 
-        audio.onplay = () => setIsSpeaking(true);
-        audio.onended = () => setIsSpeaking(false);
-        audio.onerror = () => {
-          // Cloud audio fallback to browser synthesis
-          speakBrowserUtterance(cleaned, targetLangConfig);
-        };
+        if (audioPlayerRef.current) {
+          audioPlayerRef.current.src = audioUrl;
+          audioPlayerRef.current.playbackRate = speechSpeed;
 
-        audio.play().catch(() => {
+          audioPlayerRef.current.onplay = () => setIsSpeaking(true);
+          audioPlayerRef.current.onended = () => {
+            setIsSpeaking(false);
+            setSpeakingMessageId(null);
+          };
+          audioPlayerRef.current.onerror = () => {
+            // Cloud audio fallback to browser synthesis
+            speakBrowserUtterance(cleaned, targetLangConfig);
+          };
+
+          audioPlayerRef.current.play().catch(() => {
+            speakBrowserUtterance(cleaned, targetLangConfig);
+          });
+        } else {
           speakBrowserUtterance(cleaned, targetLangConfig);
-        });
+        }
       } catch {
         speakBrowserUtterance(cleaned, targetLangConfig);
       }
@@ -251,51 +269,145 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
     }
   };
 
-  const toggleListening = () => {
+  // Toggle Speech Recognition with Permission Check & Error Guidance
+  const toggleListening = async () => {
+    primeAudio();
+    stopAllAudio();
+    setMicErrorMessage('');
+
     if (isListening) {
-      recognitionRef.current?.stop();
-      setIsListening(false);
-    } else {
-      setTranscript('');
-      if (synthRef.current) {
-        synthRef.current.cancel();
-        setIsSpeaking(false);
-      }
-      try {
-        if (recognitionRef.current) {
-          recognitionRef.current.lang = currentLanguageConfig.speechCode;
-          recognitionRef.current.start();
-        } else {
-          // Simulated voice prompt for environments where Web Speech API is blocked
-          setIsListening(true);
-          setTimeout(() => {
-            const sampleSpeech =
-              language === 'kn'
-                ? 'ಕೋಲಾರ ಮಂಡಿಯಲ್ಲಿ ಇಂದಿನ ಟೊಮೆಟೊ ದರ ಎಷ್ಟು?'
-                : language === 'hi'
-                ? 'आज कोलार मंडी में टमाटर का भाव क्या है?'
-                : 'What is today tomato price in Kolar mandi?';
-            setTranscript(sampleSpeech);
-            setIsListening(false);
-            handleUserQuery(sampleSpeech);
-          }, 2000);
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {
+          // ignore
         }
-      } catch (err) {
-        console.warn('Error starting speech recognition:', err);
-        setIsListening(false);
       }
+      setIsListening(false);
+      return;
+    }
+
+    setTranscript('');
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setMicErrorMessage(
+        language === 'kn'
+          ? 'ನಿಮ್ಮ ಬ್ರೌಸರ್‌ನಲ್ಲಿ ಮೈಕ್ರೊಫೋನ್ ಗುರುತಿಸುವಿಕೆ ಬೆಂಬಲಿಸುವುದಿಲ್ಲ. ಕೆಳಗಿನ ತ್ವರಿತ ಪ್ರಶ್ನೆಗಳನ್ನು ಬಳಸಿ ಅಥವಾ ಟೈಪ್ ಮಾಡಿ.'
+          : 'Speech recognition is not supported in this browser. Please use quick prompts below or type your question.'
+      );
+      return;
+    }
+
+    // Try requesting user media permission
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      try {
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (permErr: any) {
+        console.warn('Microphone permission check failed:', permErr);
+        if (permErr.name === 'NotAllowedError' || permErr.name === 'PermissionDeniedError') {
+          setMicErrorMessage(
+            language === 'kn'
+              ? 'ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ನಿರ್ಬಂಧಿಸಲಾಗಿದೆ. ಬ್ರೌಸರ್ ಅಡ್ರೆಸ್ ಬಾರ್‌ನಲ್ಲಿ ಮೈಕ್ ಐಕಾನ್ ಕ್ಲಿಕ್ ಮಾಡಿ ಅನುಮತಿಸಿ.'
+              : 'Microphone permission blocked. Please allow microphone access in your browser address bar.'
+          );
+          return;
+        }
+      }
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = currentLanguageConfig.speechCode;
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        setMicErrorMessage('');
+      };
+
+      recognition.onresult = (event: any) => {
+        let interim = '';
+        let final = '';
+        for (let i = 0; i < event.results.length; i++) {
+          if (event.results[i].isFinal) {
+            final += event.results[i][0].transcript;
+          } else {
+            interim += event.results[i][0].transcript;
+          }
+        }
+        const textToShow = final || interim;
+        setTranscript(textToShow);
+
+        if (final.trim()) {
+          try {
+            recognition.stop();
+          } catch {
+            // ignore
+          }
+          setIsListening(false);
+          handleUserQuery(final.trim());
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        console.warn('Speech recognition error event:', event.error);
+        setIsListening(false);
+        if (event.error === 'not-allowed') {
+          setMicErrorMessage(
+            language === 'kn'
+              ? 'ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ಬ್ರೌಸರ್ ಅಡ್ರೆಸ್ ಬಾರ್‌ನಲ್ಲಿ ಮೈಕ್ ಆನ್ ಮಾಡಿ ಅಥವಾ ಕೆಳಗಿನ ಪ್ರಶ್ನೆಗಳನ್ನು ಒತ್ತಿ.'
+              : 'Microphone permission denied. Allow mic access in address bar or tap quick questions.'
+          );
+        } else if (event.error === 'network') {
+          setMicErrorMessage(
+            language === 'kn'
+              ? 'ನೆಟ್‌ವರ್ಕ್ ಮೈಕ್ರೊಫೋನ್ ಲಭ್ಯವಿಲ್ಲ. ಕೆಳಗಿನ ತ್ವರಿತ ಪ್ರಶ್ನೆಗಳನ್ನು ಆಯ್ಕೆಮಾಡಿ.'
+              : 'Speech recognition network timeout. Please tap one of the quick prompts below.'
+          );
+        } else if (event.error === 'no-speech') {
+          setMicErrorMessage(
+            language === 'kn'
+              ? 'ಧ್ವನಿ ಕೇಳಿಸಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮೈಕ್ ಹತ್ತಿರ ಮಾತನಾಡಿ ಅಥವಾ ಕೆಳಗಿನ ಆಯ್ಕೆಗಳನ್ನು ಒತ್ತಿ.'
+              : 'No voice was detected. Please speak closer to microphone or tap quick prompts.'
+          );
+        }
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (err: any) {
+      console.warn('Error starting speech recognition:', err);
+      setIsListening(false);
+      setMicErrorMessage(
+        language === 'kn'
+          ? 'ಮೈಕ್ರೊಫೋನ್ ಪ್ರಾರಂಭಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ಕೆಳಗಿನ ತ್ವರಿತ ಧ್ವನಿ ಪ್ರಶ್ನೆಗಳನ್ನು ಒತ್ತಿ.'
+          : 'Could not activate microphone. Tap one of the suggested prompts below.'
+      );
     }
   };
 
   const handleUserQuery = async (queryText: string) => {
     if (!queryText.trim()) return;
 
+    primeAudio();
+    stopAllAudio();
+    setMicErrorMessage('');
+
+    const userMsgId = `user-${Date.now()}`;
     const userMsg = {
-      id: `user-${Date.now()}`,
+      id: userMsgId,
       sender: 'user' as const,
       text: queryText,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
+
     setMessages((prev) => [...prev, userMsg]);
     setTranscript('');
     setInputText('');
@@ -328,10 +440,11 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
             : 'Live APMC rate for Tomato is ₹32/kg (up 8.4%). AI predicts an upward price trend of 10-14% over the next 7 days.';
       }
 
+      const aiMsgId = `ai-${Date.now()}`;
       setMessages((prev) => [
         ...prev,
         {
-          id: `ai-${Date.now()}`,
+          id: aiMsgId,
           sender: 'ai',
           text: aiReply,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -339,24 +452,28 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
       ]);
 
       if (autoSpeak) {
-        speakText(aiReply);
+        setTimeout(() => {
+          speakText(aiReply, undefined, aiMsgId);
+        }, 150);
       }
-    } catch (err) {
+    } catch {
       const fallbackMsg =
         language === 'kn'
           ? 'ಕೋಲಾರ ಮಂಡಿ ದರ: ಟೊಮೆಟೊ ₹32/ಕೆಜಿ, ಈರುಳ್ಳಿ ₹28/ಕೆಜಿ. ಹವಾಮಾನ: ಸಾಧಾರಣ ಬಿಸಿಲು ಮತ್ತು ಉತ್ತಮ ಕಟಾವು ಸಮಯ.'
           : 'Live mandi rate: Tomato ₹32/kg, Onion ₹28/kg. Weather: optimal harvest window.';
+
+      const fallbackId = `ai-${Date.now()}`;
       setMessages((prev) => [
         ...prev,
         {
-          id: `ai-${Date.now()}`,
+          id: fallbackId,
           sender: 'ai',
           text: fallbackMsg,
           time: 'Now',
         },
       ]);
       if (autoSpeak) {
-        speakText(fallbackMsg);
+        speakText(fallbackMsg, undefined, fallbackId);
       }
     } finally {
       setIsProcessing(false);
@@ -366,44 +483,47 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
   const sampleVoicePrompts: Record<LanguageCode, string[]> = {
     kn: [
       'ಕೋಲಾರ ಮಂಡಿಯಲ್ಲಿ ಟೊಮೆಟೊ ದರ ಎಷ್ಟು?',
+      'ನಾಳೆಯ ಟೊಮೆಟೊ ಬೆಲೆ ಮುನ್ಸೂಚನೆ ತಿಳಿಸಿ',
       'ನನ್ನ ಬಳಿ 2 ಟನ್ ಈರುಳ್ಳಿ ಇದೆ, ಖರೀದಿದಾರರನ್ನು ಹುಡುಕಿ',
       'ಟೊಮೆಟೊ ಎಲೆ ಮಚ್ಚೆ ರೋಗಕ್ಕೆ ಔಷಧಿ ಏನು?',
-      'ಮುಂದಿನ ವಾರದ ಬೆಲೆ ಮುನ್ಸೂಚನೆ ತಿಳಿಸಿ',
       'ಆಲೂಗಡ್ಡೆ ಬೆಲೆ ಹೆಚ್ಚಾಗುತ್ತದೆಯೇ?',
     ],
     hi: [
       'आज टमाटर का मंडी भाव क्या है?',
+      'टमाटर का कल का मूल्य पूर्वानुमान बताएं',
       'मेरे पास 2 टन प्याज है, थोक खरीदार खोजें',
       'टमाटर की फसल में झुलसा रोग का उपचार बताएं',
-      'अगले 7 दिनों का मूल्य पूर्वानुमान दिखाएं',
     ],
     te: [
       'ఈరోజు మార్కెట్లో టమాటా ధర ఎంత?',
+      'రేపటి టమాటా ధర అంచనా తెలపండి',
       'నా వద్ద 2 టన్నుల ఉల్లిపాయలు ఉన్నాయి, కొనుగోలుదారులను చూపించండి',
-      'పంట తెగుళ్ల నివారణ మందులు ఏమిటి?',
     ],
     ta: [
       'இன்றைய தக்காளி மண்டி விலை என்ன?',
+      'நாளைய தக்காளி விலை கணிப்பு என்ன?',
       '2 டன் வெங்காயத்திற்கு வாங்குபவர்களைக் கண்டறியவும்',
-      'பயிர் பூச்சி மருந்து பரிந்துரைகள்',
     ],
     ml: [
       'ഇന്നത്തെ തക്കാളി വിപണി വില എത്രയാണ്?',
+      'നാളെ തക്കാളി വില കൂടുമോ?',
       'വിള രോഗങ്ങൾക്കുള്ള പ്രതിവിധി എന്താണ്?',
     ],
     mr: [
       'आज टोमॅटोचा बाजारभाव काय आहे?',
+      'उद्या टोमॅटोचे भाव काय असतील?',
       'माझ्याकडे २ टन कांदा आहे, व्यापारी शोधा',
     ],
     bn: [
       'আজকে টমেটোর মান্ডি দর কত?',
+      'আগামীকালের টমেটোর দামের পূর্বাভাস কি?',
       'ফসলের রোগ নিরাময়ের উপায় কি?',
     ],
     en: [
       'What is today tomato mandi price in Kolar?',
+      'Show tomorrow price prediction for Tomato',
       'Find verified buyers for 2 tons of onions',
       'How to treat early blight on tomato leaves?',
-      'Show 7-day AI price prediction forecast',
     ],
   };
 
@@ -413,12 +533,15 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-emerald-950/60 backdrop-blur-md">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-emerald-950/70 backdrop-blur-md">
+        {/* Hidden persistent audio element for clean playback */}
+        <audio ref={audioPlayerRef} playsInline className="hidden" />
+
         <motion.div
           initial={{ opacity: 0, scale: 0.93, y: 20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.93, y: 20 }}
-          className="w-full max-w-2xl bg-white rounded-3xl border border-[#064e3b25] shadow-2xl overflow-hidden flex flex-col h-[660px] text-[#064e3b]"
+          className="w-full max-w-2xl bg-white rounded-3xl border border-[#064e3b25] shadow-2xl overflow-hidden flex flex-col h-[670px] max-h-[92vh] text-[#064e3b]"
         >
           {/* Header with Title & Controls */}
           <div className="p-4 px-6 border-b border-[#064e3b15] bg-[#f1f5f2] flex items-center justify-between">
@@ -434,7 +557,9 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
                     <span>{currentLanguageConfig.nativeName}</span>
                   </span>
                 </div>
-                <p className="text-xs text-[#064e3b80]">Speaks & Listens natively in {currentLanguageConfig.label}</p>
+                <p className="text-xs text-[#064e3b80]">
+                  {language === 'kn' ? 'ಕನ್ನಡದಲ್ಲೇ ಧ್ವನಿ ಸಹಾಯಕ (ಮಾತನಾಡಿ & ಆಲಿಸಿ)' : `Speaks & Listens natively in ${currentLanguageConfig.label}`}
+                </p>
               </div>
             </div>
 
@@ -444,7 +569,8 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
                   onClick={stopAllAudio}
                   className="px-3 py-1.5 rounded-full bg-amber-100 text-amber-950 hover:bg-amber-200 border border-amber-300 transition-all text-xs flex items-center gap-1.5 font-bold animate-pulse cursor-pointer shadow-xs"
                 >
-                  <VolumeX className="w-3.5 h-3.5" /> Stop Voice
+                  <VolumeX className="w-3.5 h-3.5" />
+                  <span>{language === 'kn' ? 'ಧ್ವನಿ ನಿಲ್ಲಿಸಿ' : 'Stop Voice'}</span>
                 </button>
               )}
 
@@ -463,6 +589,10 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
               <button
                 onClick={() => {
                   stopAllAudio();
+                  if (isListening && recognitionRef.current) {
+                    recognitionRef.current.stop();
+                    setIsListening(false);
+                  }
                   onClose();
                 }}
                 className="p-2 rounded-full text-[#064e3b70] hover:text-[#064e3b] hover:bg-emerald-100/60 transition-all cursor-pointer"
@@ -476,7 +606,7 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
           <div className="px-5 py-2 bg-emerald-50/80 border-b border-[#064e3b15] flex items-center gap-2 overflow-x-auto no-scrollbar">
             <span className="text-[11px] font-bold text-[#064e3b] flex items-center gap-1 shrink-0">
               <Globe className="w-3.5 h-3.5 text-emerald-700" />
-              <span>{t('Language / ಧ್ವನಿ ಭಾಷೆ')}:</span>
+              <span>{language === 'kn' ? 'ಧ್ವನಿ ಭಾಷೆ:' : 'Language:'}</span>
             </span>
             <div className="flex items-center gap-1.5">
               {languages.map((lang) => {
@@ -500,6 +630,22 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
             </div>
           </div>
 
+          {/* Mic Error Banner with guidance */}
+          {micErrorMessage && (
+            <div className="p-2.5 px-5 bg-amber-50 border-b border-amber-300 text-xs text-amber-900 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>{micErrorMessage}</span>
+              </div>
+              <button
+                onClick={() => setMicErrorMessage('')}
+                className="text-amber-700 hover:text-amber-950 font-bold px-1"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           {/* Voice Settings Drawer */}
           {showSettings && (
             <motion.div
@@ -516,11 +662,11 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
                     onChange={(e) => setAutoSpeak(e.target.checked)}
                     className="rounded text-[#064e3b]"
                   />
-                  <span>🔊 Auto-Speak Answers</span>
+                  <span>🔊 {language === 'kn' ? 'ಸ್ವಯಂ ಧ್ವನಿ ಉತ್ತರ (Auto-Speak)' : 'Auto-Speak Answers'}</span>
                 </label>
 
                 <div className="flex items-center gap-1.5 bg-white/90 px-2.5 py-1 rounded-lg border border-[#064e3b20]">
-                  <span className="font-bold text-[#064e3b]">Voice Engine:</span>
+                  <span className="font-bold text-[#064e3b]">Engine:</span>
                   <button
                     onClick={() => setVoiceEngine('cloud')}
                     className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all ${
@@ -529,7 +675,7 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
                         : 'text-[#064e3b80] hover:text-[#064e3b]'
                     }`}
                   >
-                    ✨ HD Native ({currentLanguageConfig.label})
+                    ✨ {language === 'kn' ? 'ಕನ್ನಡ ಧ್ವನಿ (HD)' : `HD Native (${currentLanguageConfig.label})`}
                   </button>
                   <button
                     onClick={() => setVoiceEngine('browser')}
@@ -564,23 +710,6 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
                   </button>
                 ))}
               </div>
-
-              {voiceEngine === 'browser' && availableVoices.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-[#064e3b]">Voice:</span>
-                  <select
-                    value={selectedVoiceURI}
-                    onChange={(e) => setSelectedVoiceURI(e.target.value)}
-                    className="px-2 py-1 rounded-lg bg-white border border-[#064e3b20] text-[11px] text-[#064e3b] max-w-[180px] truncate"
-                  >
-                    {availableVoices.map((v) => (
-                      <option key={v.voiceURI} value={v.voiceURI}>
-                        {v.name} ({v.lang})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
             </motion.div>
           )}
 
@@ -599,14 +728,14 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
                   </div>
                 )}
                 <div
-                  className={`max-w-[82%] p-4 rounded-2xl text-sm leading-relaxed relative group ${
+                  className={`max-w-[85%] p-4 rounded-2xl text-sm leading-relaxed relative group ${
                     msg.sender === 'user'
                       ? 'bg-[#064e3b] text-white rounded-tr-none shadow-sm'
                       : 'bg-white border border-[#064e3b15] text-[#064e3b] rounded-tl-none shadow-sm'
                   }`}
                 >
                   <p className="whitespace-pre-wrap font-medium">{msg.text}</p>
-                  <div className="flex items-center justify-between mt-2 pt-1 border-t border-black/5">
+                  <div className="flex items-center justify-between mt-2 pt-1 border-t border-black/5 gap-2">
                     <span
                       className={`text-[10px] ${
                         msg.sender === 'user' ? 'text-emerald-200' : 'text-[#064e3b60]'
@@ -617,12 +746,31 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
 
                     {msg.sender === 'ai' && (
                       <button
-                        onClick={() => speakText(msg.text)}
-                        className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 hover:bg-emerald-100 text-[#064e3b] font-bold border border-emerald-200 transition-all cursor-pointer"
-                        title="Listen to this answer in active voice"
+                        onClick={() => {
+                          if (speakingMessageId === msg.id && isSpeaking) {
+                            stopAllAudio();
+                          } else {
+                            speakText(msg.text, undefined, msg.id);
+                          }
+                        }}
+                        className={`inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full font-bold border transition-all cursor-pointer ${
+                          speakingMessageId === msg.id && isSpeaking
+                            ? 'bg-emerald-600 text-white border-emerald-700 animate-pulse'
+                            : 'bg-emerald-50 hover:bg-emerald-100 text-[#064e3b] border-emerald-300'
+                        }`}
+                        title="Listen to this answer in spoken voice"
                       >
-                        <Volume2 className="w-3.5 h-3.5 text-emerald-700" />
-                        <span>{language === 'kn' ? 'ಕೇಳಿ' : 'Listen'}</span>
+                        {speakingMessageId === msg.id && isSpeaking ? (
+                          <>
+                            <VolumeX className="w-3.5 h-3.5" />
+                            <span>{language === 'kn' ? 'ನಿಲ್ಲಿಸಿ' : 'Stop'}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Volume2 className="w-3.5 h-3.5 text-emerald-700" />
+                            <span>{language === 'kn' ? 'ಧ್ವನಿ ಕೇಳಿ' : 'Listen'}</span>
+                          </>
+                        )}
                       </button>
                     )}
                   </div>
@@ -637,9 +785,7 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
                 </div>
                 <span>
                   {language === 'kn'
-                    ? 'ಅಗ್ರಿಟೆಕ್ ಎಐ ವಿಶ್ಲೇಷಿಸುತ್ತಿದೆ...'
-                    : language === 'hi'
-                    ? 'एग्रीटेक एआई विश्लेषण कर रहा है...'
+                    ? 'ಅಗ್ರಿಟೆಕ್ ಎಐ ಕನ್ನಡದಲ್ಲಿ ವಿಶ್ಲೇಷಿಸುತ್ತಿದೆ...'
                     : 'AgriAI is analyzing mandi prices and agricultural records...'}
                 </span>
               </div>
@@ -652,15 +798,20 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
           <div className="px-5 py-2.5 flex flex-wrap gap-2 border-t border-[#064e3b15] bg-[#f1f5f2]/90">
             <span className="text-[11px] font-bold text-[#064e3b] flex items-center gap-1 w-full">
               <Sparkles className="w-3.5 h-3.5 text-emerald-700" />
-              <span>{language === 'kn' ? 'ಸೂಚಿಸಲಾದ ಪ್ರಶ್ನೆಗಳು (ಸ್ಪರ್ಶಿಸಿ ಕೇಳಿ):' : 'Suggested Questions (Tap to Ask):'}</span>
+              <span>
+                {language === 'kn'
+                  ? 'ಸೂಚಿಸಲಾದ ಕನ್ನಡ ಪ್ರಶ್ನೆಗಳು (ಸ್ಪರ್ಶಿಸಿ ಕೇಳಿ):'
+                  : 'Suggested Questions (Tap to Ask):'}
+              </span>
             </span>
             {currentPrompts.map((prompt, i) => (
               <button
                 key={i}
                 onClick={() => handleUserQuery(prompt)}
-                className="text-xs px-3.5 py-1.5 rounded-full bg-white hover:bg-emerald-100/90 border border-[#064e3b20] text-[#064e3b] font-semibold transition-all text-left truncate max-w-full shadow-xs cursor-pointer active:scale-95"
+                className="text-xs px-3.5 py-1.5 rounded-full bg-white hover:bg-emerald-100/90 border border-[#064e3b20] text-[#064e3b] font-semibold transition-all text-left truncate max-w-full shadow-xs cursor-pointer active:scale-95 flex items-center gap-1.5"
               >
-                "{prompt}"
+                <Radio className="w-3 h-3 text-emerald-600 shrink-0" />
+                <span>&quot;{prompt}&quot;</span>
               </button>
             ))}
           </div>
@@ -681,14 +832,14 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
                 <span className="ml-3 text-xs font-bold text-[#064e3b] animate-pulse">
                   {language === 'kn'
                     ? `ಕನ್ನಡದಲ್ಲಿ ಆಲಿಸಲಾಗುತ್ತಿದೆ... (${currentLanguageConfig.speechCode})`
-                    : `Listening in ${currentLanguageConfig.nativeName} (${currentLanguageConfig.speechCode})...`}
+                    : `Listening in ${currentLanguageConfig.nativeName}...`}
                 </span>
               </div>
             )}
 
             {transcript && (
               <p className="text-xs text-amber-950 bg-amber-50 px-3.5 py-1 rounded-full border border-amber-300 font-medium">
-                "{transcript}"
+                &quot;{transcript}&quot;
               </p>
             )}
 
@@ -705,8 +856,6 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
                   placeholder={
                     language === 'kn'
                       ? 'ಮಂಡಿ ಬೆಲೆ, ಹವಾಮಾನ, ರೋಗಗಳ ಬಗ್ಗೆ ಕೇಳಿ...'
-                      : language === 'hi'
-                      ? 'मंडी भाव, मौसम, फसल रोग के बारे में पूछें...'
                       : 'Ask about mandi prices, weather, crop diseases, buyers...'
                   }
                   className="w-full pl-4 pr-11 py-3 rounded-full bg-emerald-50/50 border border-[#064e3b20] focus:border-[#064e3b] focus:bg-white focus:outline-none text-[#064e3b] placeholder:text-[#064e3b50] text-sm font-medium transition-all"
@@ -728,7 +877,13 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
                     ? 'bg-rose-600 text-white shadow-rose-600/40 scale-105 animate-pulse'
                     : 'bg-[#064e3b] hover:bg-emerald-800 text-white shadow-emerald-950/20'
                 }`}
-                title={`Click to speak in ${currentLanguageConfig.nativeName} (${currentLanguageConfig.speechCode})`}
+                title={
+                  isListening
+                    ? 'Click to stop listening'
+                    : language === 'kn'
+                    ? 'ಕನ್ನಡದಲ್ಲಿ ಮಾತನಾಡಲು ಮೈಕ್ ಕ್ಲಿಕ್ ಮಾಡಿ'
+                    : `Click to speak in ${currentLanguageConfig.nativeName}`
+                }
               >
                 {isListening ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
               </button>
@@ -739,4 +894,3 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
     </AnimatePresence>
   );
 };
-

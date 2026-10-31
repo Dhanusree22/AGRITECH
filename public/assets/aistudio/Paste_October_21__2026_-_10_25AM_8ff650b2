@@ -1,0 +1,1210 @@
+# PROJECT: AGRITECH — AI-POWERED SMART AGRICULTURAL TRADING AND FARMER SUPPORT PLATFORM
+
+## 1. YOUR ROLE AND OBJECTIVE
+
+Act as a senior full-stack engineer, AI/ML engineer, cloud architect, agricultural data scientist, UI/UX designer, and product strategist.
+
+Build a complete, production-oriented, responsive web application named **AgriTech — AI-Powered Smart Agricultural Trading and Farmer Support Platform**.
+
+This must be a functional, end-to-end agricultural technology platform, not just a landing page, wireframe, static dashboard, or UI prototype.
+
+The platform must connect farmers directly with buyers, provide AI-powered agricultural guidance, deliver crop-wise, region-wise, and season-wise predictions, support multilingual communication and voice interaction, and provide an administration system to manage the complete platform.
+
+Create a modular, scalable architecture so additional features can be introduced later without rebuilding the application.
+
+Do not ask me to specify additional features now. Implement the requirements below using sensible defaults, document assumptions, and keep the project easy to extend.
+
+---
+
+## 2. TECHNOLOGY STACK
+
+Use the following technologies where compatible with Google AI Studio's current capabilities.
+
+### Frontend
+- React with TypeScript.
+- Vite or the supported React application setup.
+- Tailwind CSS for styling.
+- Reusable component architecture.
+- Lucide React icons.
+- Recharts for analytics, charts, and data visualizations.
+- Framer Motion or a compatible animation library.
+- Responsive layouts for desktop, tablet, and mobile.
+- Progressive Web App capabilities where practical.
+
+### Backend
+- Use a secure server-side API layer for business logic.
+- Use Firebase Cloud Functions or an equivalent supported server-side runtime where appropriate.
+- Implement input validation, error handling, authentication checks, role-based authorization, and API request validation.
+- Never expose secret API keys or privileged credentials in frontend code.
+
+### AI and machine learning
+- Google Gemini API for conversational AI, agricultural assistance, natural-language analysis, multilingual responses, report generation, and supported structured outputs.
+- Use the API configuration and credentials actually available in the Google AI Studio environment.
+- If credentials are not automatically provisioned, provide clear setup instructions and secure environment-variable configuration.
+- Use actual machine-learning models or verified prediction services where available.
+- Clearly distinguish live data, calculated estimates, and AI-generated recommendations.
+
+### Cloud infrastructure and database
+Use Firebase as the preferred Google-native cloud platform:
+
+- **Firebase Authentication:** account creation, login, logout, password reset, and identity management.
+- **Cloud Firestore:** primary cloud database for structured application records, user profiles, products, orders, market observations, predictions, and activity records.
+- **Firebase Cloud Storage:** images, crop photographs, documents, reports, and other unstructured files.
+- **Firebase App Check:** protect supported application resources from unauthorized clients.
+- **Firebase Security Rules:** enforce user identity, ownership, role-based access, and data validation.
+- **Firebase Cloud Functions:** securely handle sensitive operations and integrations.
+- **Firebase Hosting or an appropriate supported hosting service:** deploy the frontend.
+
+Use current supported Firebase SDKs and APIs. If direct provisioning is unavailable in Google AI Studio, generate the required configuration files, integration code, security rules, environment templates, and setup instructions. Do not pretend that a cloud service or database has been connected until the connection is verified.
+
+Firestore is a document-oriented NoSQL database suitable for flexible, semi-structured records. Cloud Storage must be used for binary and large unstructured files. Do not attempt to store entire image or video files inside Firestore documents.
+
+---
+
+## 3. DESIGN SYSTEM AND VISUAL IDENTITY
+
+Create a stunning, premium, modern agricultural technology interface.
+
+The design should combine futuristic AI dashboard aesthetics with natural agricultural imagery and a trustworthy, professional business platform.
+
+### Color palette
+
+Use a sophisticated, vibrant palette:
+
+- Deep Forest Green: #123D2A
+- Emerald Green: #10B981
+- Electric Lime: #C6FF4A
+- Bright Sky Blue: #00B8F0
+- Soft Mint: #DDF8E8
+- Warm Off-White: #F7F9F4
+- Charcoal: #18251E
+- White: #FFFFFF
+- Amber: #F5A623 for important warnings and market highlights.
+
+Use gradients such as forest green to emerald, emerald to electric lime, and deep green to sky blue for selected hero elements, AI indicators, and data visualizations.
+
+Apply the 60–30–10 color rule to avoid overwhelming the interface.
+
+### UI/UX requirements
+
+- Create a premium, visually engaging landing page.
+- Use large agricultural hero imagery and polished typography.
+- Use modern cards, rounded corners, soft shadows, subtle borders, glass effects only where appropriate, and elegant gradients.
+- Add subtle particle effects, animated gradient backgrounds, smooth transitions, hover effects, animated counters, and tasteful reveal animations.
+- Use real agricultural photographs and illustrations rather than excessive generic emoji.
+- Use pictograms, iconography, infographic cards, crop illustrations, process diagrams, and visual status indicators.
+- Use meaningful empty states, loading skeletons, progress indicators, success messages, and error states.
+- Design dashboard layouts with clear visual hierarchy.
+- Use charts and infographics instead of presenting every result as plain text.
+- Provide accessible contrast, keyboard navigation, visible focus states, labels, and screen-reader-friendly controls.
+- Respect reduced-motion preferences.
+- Avoid excessive animations that impair usability or mobile performance.
+
+Create a reusable design system with consistent buttons, forms, cards, navigation, dialogs, badges, charts, tables, notifications, and page layouts.
+
+---
+
+## 4. APPLICATION ARCHITECTURE AND ROUTING
+
+Create the following main routes:
+
+Public pages:
+- `/` — Home and landing page.
+- `/login` — Login.
+- `/register` — Registration and role selection.
+- `/forgot-password` — Password recovery.
+- `/unauthorized` — Access-denied page.
+- `/privacy` — Privacy policy.
+- `/terms` — Terms and conditions.
+
+Farmer module:
+- `/farmer/dashboard`
+- `/farmer/crops`
+- `/farmer/market`
+- `/farmer/predictions`
+- `/farmer/ai-advisor`
+- `/farmer/orders`
+- `/farmer/finance`
+- `/farmer/calendar`
+- `/farmer/reports`
+- `/farmer/profile`
+
+Buyer module:
+- `/buyer/dashboard`
+- `/buyer/marketplace`
+- `/buyer/product/:productId`
+- `/buyer/farmers`
+- `/buyer/orders`
+- `/buyer/favorites`
+- `/buyer/market-intelligence`
+- `/buyer/ai-assistant`
+- `/buyer/reports`
+- `/buyer/profile`
+
+Admin module:
+- `/admin/dashboard`
+- `/admin/users`
+- `/admin/farmers`
+- `/admin/buyers`
+- `/admin/products`
+- `/admin/orders`
+- `/admin/analytics`
+- `/admin/ai-monitoring`
+- `/admin/content`
+- `/admin/audit-logs`
+- `/admin/settings`
+
+Create protected routing so each authenticated user can access only authorized pages.
+
+Do not rely on hiding navigation items alone for security. Verify roles and resource ownership in backend functions and database security rules.
+
+Use a shared application shell where appropriate, with a different navigation menu, dashboard, permissions, and functionality for each role.
+
+---
+
+## 5. HOME PAGE
+
+Build a premium landing page containing the following sections.
+
+### A. Navigation bar
+- AgriTech logo with a leaf and AI-inspired symbol.
+- Home.
+- Features.
+- How It Works.
+- AI Intelligence.
+- Marketplace.
+- Languages.
+- Login.
+- Get Started.
+- Responsive mobile navigation menu.
+
+### B. Hero section
+Headline:
+
+"Grow Smarter. Trade Better. Farm the Future."
+
+Supporting text:
+
+"One intelligent platform connecting farmers, buyers, and agricultural administrators through AI-powered insights, transparent trading, and real-time agricultural intelligence."
+
+Primary CTA: Get Started.
+
+Secondary CTA: Explore AgriTech.
+
+Include a visually impressive agricultural dashboard preview featuring crop analytics, mandi price cards, weather information, market trends, and an AI assistant.
+
+### C. Role-based introduction
+Create three visually distinct role cards.
+
+1. Farmer — Manage crops, discover market prices, obtain agricultural recommendations, forecast yield, and sell produce directly.
+2. Buyer — Discover verified farmer listings, compare prices, request purchases, and manage orders.
+3. Admin — Manage users, monitor marketplace activity, review analytics, and oversee platform integrity.
+
+Each card must include an icon, short description, key benefits, and a functional button.
+
+The buttons must route users through authentication and then to the relevant authorized module.
+
+### D. AI intelligence showcase
+Display interactive cards for:
+- Crop yield forecasting.
+- Market price intelligence.
+- Weather and risk monitoring.
+- Crop health assistance.
+- Demand forecasting.
+- AI-powered buyer and product matching.
+
+Explain the data sources and confidence limitations for each capability.
+
+### E. How it works
+Illustrate the workflow:
+
+Farmer registers → Adds crops and harvest details → Receives AI insights → Lists produce → Buyer discovers and orders → Farmer fulfills order → Both parties track progress.
+
+### F. Platform statistics
+Display verified platform statistics only when actual data exists.
+
+During initial setup, use clearly labeled sample preview data or placeholders. Do not invent real farmer counts, revenue, transactions, accuracy rates, or impact statistics.
+
+### G. Footer
+Include navigation, contact information placeholders, privacy policy, terms, language selector, and support links.
+
+---
+
+## 6. AUTHENTICATION AND ROLE SELECTION
+
+Build a complete authentication flow.
+
+### Registration page
+Include:
+- Full name.
+- Email address.
+- Mobile number, optional unless required for a configured service.
+- Password.
+- Confirm password.
+- Preferred language.
+- Country and state.
+- Account role selector: Farmer, Buyer, Admin.
+- Terms acceptance.
+- Password visibility toggle.
+- Field validation.
+- Password strength indicator.
+- Registration progress feedback.
+
+Display three attractive role-selection cards with icons and descriptions.
+
+### Role-specific registration fields
+
+Farmer:
+- Farm or business name, optional.
+- State and district.
+- Village or town.
+- Farm size and unit.
+- Soil type, if known.
+- Crops cultivated.
+- Preferred units.
+- Preferred language.
+
+Buyer:
+- Individual or business buyer.
+- Business name, where applicable.
+- State and district.
+- Product interests.
+- Purchase quantity preferences.
+- Preferred contact method.
+
+Admin:
+- Do not allow unrestricted public self-registration for administrator privileges.
+- A public registration request for the Admin role must never grant administrative access automatically.
+- Create the first administrator through a secure, documented bootstrap procedure.
+- Allow authorized administrators to grant or revoke roles through protected server-side operations.
+- Validate all role assignments on the server.
+
+### Authentication features
+- Firebase Authentication integration.
+- Login with email and password.
+- Google sign-in if correctly configured.
+- Email verification.
+- Password reset.
+- Logout.
+- Session persistence.
+- Protected routes.
+- Role-based redirection.
+- Friendly error handling.
+- Account profile completion.
+
+After login, redirect:
+- Farmer → `/farmer/dashboard`
+- Buyer → `/buyer/dashboard`
+- Admin → `/admin/dashboard`, only if the authenticated account has a verified admin role.
+
+---
+
+## 7. FARMER MODULE
+
+The Farmer module must help farmers make informed decisions, manage agricultural activities, and sell their products.
+
+### A. Farmer dashboard
+Create an infographic-rich dashboard containing:
+- Total active crops.
+- Cultivated area.
+- Upcoming harvests.
+- Active product listings.
+- Pending orders.
+- Estimated yield.
+- Estimated cultivation expenses.
+- Estimated profit.
+- Weather summary.
+- Current market prices.
+- Price trend graphs.
+- Crop health alerts.
+- Seasonal activity calendar.
+- AI-generated daily insights.
+
+Use line charts, bar charts, trend indicators, crop icons, weather pictograms, and clear information cards.
+
+Each metric must have a meaningful source, timestamp, and explanation.
+
+### B. Crop management with full CRUD
+Allow farmers to create, read, update, and delete crop records.
+
+Fields:
+- Crop name and variety.
+- Farm or plot identifier.
+- Cultivated area and unit.
+- Sowing date.
+- Expected harvest date.
+- Growth stage.
+- Soil type.
+- Irrigation method.
+- Seed type.
+- Fertilizer details.
+- Farming method.
+- Location.
+- Notes and optional photographs.
+
+Features:
+- Search and filtering.
+- Sorting.
+- Pagination.
+- Crop profile view.
+- Crop status tracking.
+- Validation and confirmation before deletion.
+- Upload crop photographs to Cloud Storage.
+- Store file metadata and URLs in Firestore.
+- Display historical changes where appropriate.
+
+### C. Crop-wise, region-wise, and seasonal predictions
+Build a dedicated prediction workspace.
+
+Inputs:
+- Crop and variety.
+- State, district, and location.
+- Sowing date.
+- Season: Kharif, Rabi, Zaid, or locally appropriate alternative.
+- Cultivated area.
+- Soil characteristics.
+- Irrigation availability.
+- Historical yield, if available.
+- Weather conditions.
+- Farming practices.
+
+Outputs:
+- Estimated yield per unit of area.
+- Total estimated production.
+- Expected harvest window.
+- Estimated cultivation cost.
+- Estimated revenue.
+- Potential profit or loss.
+- Market demand outlook.
+- Environmental or weather risks.
+- Recommended actions.
+- Model confidence or uncertainty range.
+- Data freshness.
+- Explanation of the main influencing factors.
+
+Allow users to compare crops, seasons, and locations.
+
+Never generate predictions by inventing live measurements. Use validated datasets, actual API responses, or explicitly labeled estimates. If there is insufficient data, explain what is missing.
+
+### D. Agricultural AI advisor
+Create an AI-powered advisory workspace for:
+- Crop selection.
+- Soil preparation.
+- Sowing schedules.
+- Irrigation planning.
+- Fertilizer guidance.
+- Pest and disease identification assistance.
+- Crop rotation.
+- Sustainable farming.
+- Harvest planning.
+- Post-harvest management.
+
+Support text and image inputs where supported.
+
+Provide localized, practical recommendations. Ask for crop, growth stage, region, and relevant symptoms when required.
+
+Distinguish preliminary AI guidance from confirmed diagnoses. Avoid unsafe pesticide instructions, unsupported chemical dosages, or claims that a visual assessment definitively identifies a disease.
+
+### E. Marketplace and product listings
+Allow farmers to:
+- Create product listings.
+- Upload product images.
+- Set quantity and measurement units.
+- Set asking price.
+- Specify grade and quality.
+- Add harvest or availability dates.
+- Specify pickup or delivery preferences.
+- Update stock.
+- Pause or activate listings.
+- View purchase requests.
+- Accept or reject requests.
+- Track order status.
+
+Implement complete CRUD operations with secure ownership checks.
+
+### F. Market prices and selling intelligence
+Display:
+- Crop-wise market prices.
+- Mandi-wise prices.
+- Minimum, maximum, and modal prices when provided by the source.
+- Historical price trends.
+- Recent price changes.
+- Nearby market comparisons.
+- Harvest timing insights.
+- Potential selling opportunities.
+
+Provide filters for state, district, mandi, crop, variety, date, and market.
+
+Clearly display source, observation date, unit, and whether the value is live, recently updated, or historical.
+
+### G. Expense and profit tracker
+Allow farmers to record:
+- Seeds.
+- Fertilizers.
+- Irrigation.
+- Labor.
+- Machinery.
+- Transportation.
+- Packaging.
+- Other expenses.
+
+Calculate:
+- Total cost.
+- Cost per unit of area.
+- Estimated production cost per unit.
+- Actual sales revenue.
+- Estimated profit.
+- Profit margin.
+- Break-even selling price.
+
+Distinguish estimated values from actual recorded transactions.
+
+### H. Crop calendar
+Provide:
+- Sowing reminders.
+- Irrigation reminders.
+- Fertilization reminders.
+- Crop monitoring.
+- Expected harvest dates.
+- Weather-related alerts.
+- Seasonal farming tasks.
+
+Generate crop calendars using location, crop, season, and configured agricultural guidance sources. Allow farmers to edit schedules.
+
+### I. Farmer reports
+Generate visual reports showing:
+- Crop performance.
+- Yield comparisons.
+- Market price history.
+- Expense breakdown.
+- Revenue and profit.
+- Crop-wise performance.
+- Seasonal comparisons.
+- Prediction history.
+
+Support downloadable CSV and PDF reports where implemented.
+
+---
+
+## 8. BUYER MODULE
+
+The Buyer module must enable buyers to find agricultural produce directly from farmers.
+
+### A. Buyer dashboard
+Show:
+- Available products.
+- Recent purchases.
+- Pending requests.
+- Active orders.
+- Favorite farmers.
+- Purchase spending.
+- Price comparisons.
+- Demand trends.
+- AI-generated sourcing recommendations.
+
+### B. Agricultural marketplace
+Create a searchable product marketplace with:
+- Product images.
+- Crop name and variety.
+- Quantity available.
+- Unit price.
+- Quality grade.
+- Farmer or farm profile.
+- District and state.
+- Availability date.
+- Fulfillment options.
+- Listing status.
+
+Filters:
+- Crop.
+- Price range.
+- Quantity.
+- Quality grade.
+- Location.
+- Harvest date.
+- Farmer.
+- Availability.
+
+Use pagination and optimized queries.
+
+### C. Product details
+Show:
+- Complete product information.
+- Image gallery.
+- Available quantity.
+- Price and unit.
+- Farmer details permitted for public display.
+- Product location at an appropriate privacy level.
+- Availability.
+- Order or purchase-request button.
+- Similar products.
+- Market-price comparison.
+
+### D. Buyer-farmer connection
+Allow buyers to:
+- Submit purchase requests.
+- Specify requested quantities.
+- Propose a price if enabled.
+- Select pickup or delivery preferences.
+- Contact farmers through an approved communication workflow.
+- Save favorite products and farmers.
+- Track requests and responses.
+
+Do not expose private phone numbers, exact addresses, or other protected personal information without appropriate authorization and consent.
+
+### E. Order management
+Implement an order lifecycle:
+- Draft or requested.
+- Accepted.
+- Rejected or cancelled.
+- Confirmed.
+- Preparing.
+- Ready for pickup or dispatch.
+- In transit, if logistics integration exists.
+- Delivered.
+- Completed.
+
+Allow only valid status transitions and authorized actions.
+
+Record order items, quantities, agreed prices, timestamps, parties, and relevant status history.
+
+Use secure server-side validation to prevent unauthorized modifications and incorrect totals.
+
+### F. AI sourcing assistant
+Use Gemini to help buyers:
+- Find suitable products.
+- Compare available listings.
+- Estimate sourcing requirements.
+- Identify potential suppliers.
+- Compare listed prices with relevant market observations.
+- Summarize regional availability.
+- Prepare procurement plans.
+
+Recommendations must be based on actual marketplace records or explicitly labeled example data.
+
+### G. Buyer market intelligence
+Display:
+- Crop demand trends.
+- Regional availability.
+- Price history.
+- Supply comparisons.
+- Seasonal availability.
+- Product quality and quantity distribution.
+
+Only label an insight as a real demand forecast when a suitable historical dataset or forecasting model supports it.
+
+### H. Buyer reports
+Include purchase history, spending analytics, crop-wise spending, supplier performance based on verified transactions, and exportable reports.
+
+---
+
+## 9. ADMIN MODULE
+
+The Admin module must support platform governance, operational monitoring, and analytics.
+
+### A. Admin dashboard
+Display verified metrics for:
+- Total registered users.
+- Farmers.
+- Buyers.
+- Active listings.
+- Total orders.
+- Pending requests.
+- Completed transactions.
+- Product categories.
+- Regional activity.
+- Platform errors and integration status.
+
+Provide date-range filters, charts, KPI cards, and drill-down views.
+
+### B. User management
+Allow authorized administrators to:
+- Search and filter users.
+- View user profiles.
+- Review registration status.
+- Suspend or reactivate accounts where legally and operationally appropriate.
+- Manage verification status.
+- Assign permitted roles through secure server-side controls.
+- Review reported accounts.
+
+Record administrative actions in audit logs.
+
+Prevent an administrator from accidentally removing the last active administrator.
+
+### C. Product management
+Allow administrators to:
+- Review listings.
+- Remove prohibited or fraudulent content.
+- Suspend listings.
+- Resolve reported products.
+- Review product metadata.
+- Monitor suspicious listing activity.
+
+Do not silently modify a farmer's legitimate listing without recording the administrative action.
+
+### D. Order monitoring
+Provide:
+- Order search.
+- Status filters.
+- Dispute review.
+- Cancellation monitoring.
+- Transaction history.
+- Order-level audit trails.
+
+Do not fabricate payments or payment confirmations. Integrate a payment provider only if explicitly configured.
+
+### E. Platform analytics
+Build interactive analytics for:
+- User registrations over time.
+- Farmer and buyer activity.
+- Crop-wise listings.
+- Regional supply distribution.
+- Order completion rates.
+- Marketplace activity.
+- Common support requests.
+- System usage and errors.
+
+Use aggregations derived from actual authorized records.
+
+### F. AI monitoring
+Display:
+- Gemini service status.
+- Prediction-service status.
+- API failures.
+- Request counts where available.
+- Error rates.
+- Latency where measured.
+- Data-source freshness.
+- Model versions.
+- Prediction logs and confidence metadata.
+
+Never expose API keys, passwords, confidential prompts, or private user content in the monitoring interface.
+
+### G. Content and configuration management
+Allow authorized admins to manage:
+- Crop categories.
+- Product categories.
+- Supported languages.
+- Platform announcements.
+- Agricultural guidance references.
+- Feature flags.
+- Public content.
+- Configured API integrations.
+
+### H. Audit logs
+Record relevant administrative and sensitive actions with:
+- Actor ID.
+- Action type.
+- Target resource.
+- Timestamp.
+- Outcome.
+- Safe metadata.
+
+Protect audit records from unauthorized alteration.
+
+---
+
+## 10. AI/ML PREDICTION ENGINE
+
+Design a modular prediction layer rather than treating a language model as the sole source of numerical predictions.
+
+Implement the following capabilities where appropriate datasets and APIs are available.
+
+### A. Crop yield prediction
+Use historical yield data and relevant factors such as crop, region, season, soil, irrigation, and weather.
+
+Support regression models such as Random Forest, Gradient Boosting, or another suitable validated model.
+
+Provide evaluation metrics only after actual evaluation against a held-out dataset.
+
+### B. Crop price forecasting
+Use historical market prices and relevant crop, mandi, seasonal, and regional data.
+
+Implement a suitable time-series forecasting model when sufficient data exists.
+
+Show historical observations separately from forecast values.
+
+### C. Crop demand forecasting
+Estimate demand only when sufficient historical sales, transaction, or other relevant demand data is available.
+
+Do not treat the number of product listings as equivalent to actual demand.
+
+### D. Crop recommendation
+Recommend potentially suitable crops using location, season, soil characteristics, water availability, and verified agronomic guidance.
+
+Explain the factors influencing each recommendation.
+
+### E. Weather and agricultural risk
+Use current and forecast weather data to identify relevant risks, such as heavy rainfall, high temperatures, or dry periods.
+
+Show forecast validity and uncertainty.
+
+### F. Revenue and profit estimation
+Calculate estimates using yield estimates, market-price observations, cultivation expenses, and user-provided assumptions.
+
+Show the formula and assumptions used.
+
+### G. Model reliability
+For every prediction:
+- Identify the crop and region.
+- Show the target period.
+- Show the data timestamp.
+- Show the model or method used.
+- Display a calibrated confidence interval or an honest uncertainty description when supported.
+- Explain important factors.
+- State data limitations.
+- Store prediction history.
+- Allow comparisons with later actual outcomes.
+
+Do not label Gemini-generated text as a trained predictive model.
+
+If a dedicated model has not been trained or a required dataset is unavailable, implement a clearly labeled baseline estimate and define the path to integrate a trained model later.
+
+---
+
+## 11. REAL-TIME DATA AND API INTEGRATIONS
+
+Build an API integration layer that can be configured using current, documented APIs.
+
+Prioritize the following sources.
+
+### A. Google Gemini API
+Use for:
+- Agricultural chatbot.
+- Natural-language agricultural advice.
+- Multilingual responses.
+- Listing descriptions.
+- Report summaries.
+- Structured extraction.
+- Explanations of model outputs.
+
+Use supported models and endpoints available at implementation time.
+
+### B. Weather API
+Use Open-Meteo or another suitable documented provider for:
+- Current weather where supported.
+- Forecasts.
+- Rainfall.
+- Temperature.
+- Humidity.
+- Wind.
+- Historical weather where available.
+
+Use location coordinates or validated location mapping. Handle missing coverage and API failures.
+
+### C. Indian agricultural market data
+Investigate available official government data sources, including:
+- AGMARKNET.
+- Government of India Open Government Data Platform.
+- Relevant official agricultural market price datasets.
+
+Use official APIs where available and authorized.
+
+Do not assume that every endpoint is public, free, unrestricted, or real-time. Check the current API documentation, authentication requirements, rate limits, licensing, and update frequency.
+
+If a supported official API is unavailable, provide an integration adapter for an authorized dataset or upload workflow. Clearly label cached, historical, or manually uploaded data.
+
+### D. Geolocation and location search
+Use a suitable geocoding provider to resolve region information where necessary.
+
+Request user permission when accessing browser location. Allow manual state, district, and location selection.
+
+### E. Image analysis
+Use Gemini vision capabilities where supported for crop-image interpretation, with appropriate image-size limits and safe handling.
+
+For reliable crop disease classification, allow a dedicated validated vision model to be integrated separately.
+
+### F. API architecture
+Create reusable server-side adapters with:
+- Timeouts.
+- Error handling.
+- Rate-limit handling.
+- Caching where appropriate.
+- Retry policies for transient errors.
+- Source attribution.
+- Data freshness timestamps.
+- Request validation.
+- Logging without sensitive data.
+
+Never fabricate successful API responses when a provider fails.
+
+Never scrape websites in violation of their terms or bypass access controls.
+
+---
+
+## 12. MULTILINGUAL SUPPORT
+
+Implement a reusable internationalization system throughout the entire application.
+
+Initially support:
+- English.
+- Kannada.
+- Hindi.
+- Tamil.
+- Telugu.
+- Malayalam.
+- Marathi.
+- Bengali.
+
+Keep translations in structured resource files rather than hardcoding text in individual components.
+
+Requirements:
+- Language selector in the public header.
+- Language preference during registration.
+- Language switcher inside each dashboard.
+- Persistent language preference for authenticated users.
+- Localized forms, buttons, menus, notifications, errors, and reports where translations are available.
+- Localized dates, numbers, and units.
+- Correct rendering of Indian scripts.
+- Language-aware chatbot prompts and responses.
+- Language-aware voice recognition and text-to-speech when supported.
+
+Do not translate only the home page. Apply internationalization consistently across all modules.
+
+If a translation is unavailable, fall back to English and clearly avoid presenting untranslated text as a completed translation.
+
+---
+
+## 13. VOICE ASSISTANT AND CHATBOT FOR ALL THREE ROLES
+
+Create a shared conversational engine with separate role-aware experiences.
+
+### Voice assistant
+Include:
+- Microphone button.
+- Start and stop listening.
+- Voice input transcription.
+- Spoken responses.
+- Language selection.
+- Text input fallback.
+- Listening indicator.
+- Playback controls.
+- Error handling for unsupported browsers and denied microphone permissions.
+
+Use supported browser speech APIs or an appropriately configured speech service. Verify actual language support instead of assuming every browser supports every language.
+
+### Farmer assistant
+Support queries such as:
+- What is the weather forecast for my farm?
+- What crops are suitable for this season?
+- What is the latest available price for my crop?
+- How can I improve my crop management?
+- When is my expected harvest?
+- What are my recorded cultivation expenses?
+
+### Buyer assistant
+Support queries such as:
+- Find available tomatoes near a selected district.
+- Compare available product prices.
+- Show farmers selling a specific crop.
+- Find products matching my required quantity.
+- Summarize my pending orders.
+- Prepare a sourcing plan.
+
+### Admin assistant
+Support:
+- Summarizing authorized platform analytics.
+- Finding listings requiring review.
+- Summarizing pending administrative tasks.
+- Explaining system health indicators.
+- Retrieving authorized aggregate reports.
+
+The assistant must obey the authenticated user's role and permissions.
+
+### Chatbot technical requirements
+- Use Gemini for natural-language understanding and responses.
+- Retrieve relevant live data from authorized backend functions.
+- Use structured function calling or equivalent validated tool interfaces where supported.
+- Never allow the model to directly bypass authorization or execute arbitrary database operations.
+- Validate every action on the server.
+- Ask for confirmation before destructive or consequential operations.
+- Do not let prompt instructions override access control.
+- Maintain conversation context appropriately.
+- Provide helpful fallback responses when an API or model is unavailable.
+
+Implement actions such as creating a crop, updating a listing, or searching products only through explicit, validated application functions with the correct permissions.
+
+---
+
+## 14. CLOUD DATABASE AND DATA MODEL
+
+Implement Firebase Authentication, Cloud Firestore, and Cloud Storage as real integrations.
+
+Design a flexible Firestore collection structure such as:
+
+- `users`
+- `farmerProfiles`
+- `buyerProfiles`
+- `crops`
+- `farmPlots`
+- `productListings`
+- `orders`
+- `orderStatusHistory`
+- `marketPriceObservations`
+- `weatherObservations`
+- `cropPredictions`
+- `priceForecasts`
+- `farmExpenses`
+- `cropCalendarEvents`
+- `favorites`
+- `notifications`
+- `conversations`
+- `conversationMessages`
+- `agriculturalGuidance`
+- `reports`
+- `adminAuditLogs`
+- `platformSettings`
+- `integrationHealth`
+
+Define document schemas, field types, timestamps, ownership fields, validation requirements, and relationships.
+
+Use stable document IDs, server timestamps, pagination, appropriate composite indexes, and batched writes where needed.
+
+Avoid unnecessary duplication of large records and prevent unbounded arrays in documents.
+
+### Unstructured data
+Use Cloud Storage for:
+- Crop images.
+- Product images.
+- Farm photographs.
+- Uploaded PDF documents.
+- Reports.
+- Optional voice recordings, only where necessary and with appropriate consent.
+
+Use metadata documents in Firestore to reference stored files.
+
+Validate MIME types, file sizes, upload permissions, and ownership. Avoid public exposure of private files.
+
+### CRUD requirements
+Implement actual create, read, update, and delete workflows for applicable entities.
+
+Every form must:
+- Validate inputs.
+- Submit data to the real cloud service.
+- Show loading states.
+- Display success and error messages.
+- Refresh or update the visible data.
+- Enforce permissions.
+- Handle network failures.
+- Confirm destructive actions.
+
+Do not simulate persistence with local arrays when a real database connection is configured.
+
+Use clearly labeled demo data only for preview or development mode.
+
+---
+
+## 15. SECURITY, PRIVACY, AND RELIABILITY
+
+Implement:
+- Firebase Authentication.
+- Role-based access control.
+- Resource ownership validation.
+- Firestore Security Rules.
+- Cloud Storage Security Rules.
+- Server-side validation.
+- Environment variables for secrets.
+- Secure API integration.
+- Protection against unauthorized role escalation.
+- Rate limiting for sensitive endpoints.
+- Safe error messages.
+- Audit logs for administrative actions.
+- Input sanitization.
+- Appropriate privacy controls.
+- Secure handling of user-uploaded files.
+- Configurable data retention policies.
+- Consent for optional location, microphone, and image processing.
+- Protection against exposing personal data in chatbot responses.
+
+Never put private service-account credentials or privileged secrets in browser code, source control, generated screenshots, or public configuration.
+
+Do not hardcode fake API keys.
+
+Do not use a publicly accessible database configuration as a substitute for security rules.
+
+Provide a `.env.example` file containing placeholder variable names only, with no real secrets.
+
+---
+
+## 16. RESPONSIVE DESIGN AND ACCESSIBILITY
+
+Optimize the entire application for:
+- Mobile phones.
+- Tablets.
+- Laptops.
+- Large desktop screens.
+
+On mobile:
+- Use a collapsible navigation menu.
+- Use touch-friendly buttons.
+- Stack dashboard cards appropriately.
+- Make charts responsive.
+- Use mobile-friendly forms.
+- Provide accessible voice controls.
+- Avoid horizontal overflow.
+- Optimize image sizes and loading.
+- Ensure tables have a usable mobile presentation.
+
+Test common screen sizes and keyboard interactions.
+
+Use semantic HTML, meaningful labels, accessible dialogs, sufficient color contrast, and descriptive alternative text.
+
+---
+
+## 17. APPLICATION STATES AND DEMONSTRATION MODE
+
+Support the following states:
+- Loading.
+- Empty.
+- Success.
+- Validation error.
+- API failure.
+- Offline or disconnected.
+- Unauthorized.
+- Insufficient data.
+- Prediction unavailable.
+- Cloud service not configured.
+
+Provide an optional demonstration mode with clearly identified sample farmers, crops, products, orders, charts, and predictions.
+
+Demo mode must never be confused with real production data.
+
+When Firebase is not configured, show a clear setup screen or development preview rather than pretending authentication, storage, or CRUD operations are working.
+
+Do not display fabricated real-time labels, fake API success indicators, or invented prediction accuracy.
+
+---
+
+## 18. TESTING REQUIREMENTS
+
+Create a testable implementation and include appropriate tests for:
+
+- Registration and login.
+- Role-based redirects.
+- Unauthorized route access.
+- Farmer crop CRUD.
+- Product listing CRUD.
+- Buyer purchase requests.
+- Order status transitions.
+- Admin permissions.
+- Firestore and Storage access rules.
+- API failure handling.
+- Multilingual interface switching.
+- Chatbot permission boundaries.
+- Responsive navigation.
+- Form validation.
+- Prediction calculations.
+- Data freshness and unavailable-data states.
+
+Include setup instructions for running the application locally and deploying it.
+
+---
+
+## 19. IMPLEMENTATION WORKFLOW
+
+Build the application in the following order.
+
+Phase 1: Project foundation
+- Set up the application.
+- Implement the design system.
+- Create the home page.
+- Create reusable layouts and navigation.
+- Add responsive styling and animations.
+
+Phase 2: Authentication
+- Implement Firebase Authentication.
+- Build registration, login, password reset, and profile completion.
+- Implement secure role-based access and redirects.
+
+Phase 3: Cloud integration
+- Configure Firestore and Cloud Storage.
+- Define document schemas and indexes.
+- Implement Security Rules.
+- Add backend functions and environment configuration.
+
+Phase 4: Farmer module
+- Build the dashboard.
+- Implement crop CRUD.
+- Implement agricultural advice.
+- Implement market intelligence.
+- Implement product listings, expenses, calendar, and reports.
+
+Phase 5: Buyer module
+- Build the marketplace.
+- Implement product search and details.
+- Implement purchase requests and order management.
+- Add sourcing intelligence and reports.
+
+Phase 6: Admin module
+- Build administration dashboards.
+- Implement user and listing management.
+- Add order monitoring, analytics, and audit logs.
+- Add integration and AI monitoring.
+
+Phase 7: AI, predictions, and integrations
+- Integrate Gemini.
+- Integrate available weather and agricultural market data.
+- Build prediction adapters.
+- Add multilingual chatbot and voice assistant functionality.
+- Add caching, source timestamps, and error handling.
+
+Phase 8: Validation and deployment
+- Test all roles.
+- Verify CRUD operations and authorization.
+- Verify mobile responsiveness.
+- Test API failure scenarios.
+- Document cloud setup and deployment.
+- Fix build errors and broken routes.
+
+Complete each phase with working code before moving to the next. Prioritize functional implementation over decorative placeholders.
+
+---
+
+## 20. REQUIRED PROJECT DELIVERABLES
+
+Generate a complete, organized application containing:
+
+1. Responsive React frontend.
+2. Home page and public navigation.
+3. Registration, login, and password recovery.
+4. Three distinct role-based application modules.
+5. Reusable dashboards and data visualizations.
+6. Firebase Authentication integration.
+7. Firestore data models and service functions.
+8. Cloud Storage integration.
+9. Firestore and Storage Security Rules.
+10. Secure server-side API integrations.
+11. Gemini-powered conversational assistant.
+12. Multilingual UI and voice interaction.
+13. Crop-wise, region-wise, and season-wise prediction architecture.
+14. Real-time or appropriately labeled cached data integrations.
+15. CRUD workflows for applicable records.
+16. Error handling, loading states, and validation.
+17. Environment-variable template.
+18. Required database indexes and configuration files.
+19. Automated tests where supported.
+20. README with local setup, Firebase configuration, API configuration, testing, limitations, and deployment instructions.
+
+Use a maintainable folder structure with separate components, pages, hooks, services, types, utilities, localization files, and backend functions.
+
+---
+
+## 21. FINAL EXECUTION INSTRUCTIONS
+
+Start by generating the project structure and implementing the complete responsive landing page and design system.
+
+Then continue implementing authentication, cloud integration, and all three modules.
+
+Do not stop after creating the home page or a visual prototype.
+
+Do not leave major features as non-functional buttons.
+
+Do not use hardcoded arrays as the permanent source of production data.
+
+Do not claim that external APIs, cloud databases, authentication providers, or machine-learning models are operational until their configuration and behavior have been verified.
+
+If a required service needs credentials, present the exact configuration steps and continue implementing all independent functionality.
+
+Keep all features modular so I can request additional pages, AI capabilities, analytics, APIs, and integrations later.
+
+**Final goal:** Deliver a visually impressive, secure, scalable, responsive, AI-enabled AgriTech application with dedicated Farmer, Buyer, and Admin modules, genuine cloud persistence, transparent agricultural intelligence, multilingual voice interaction, and a clear path to production deployment.

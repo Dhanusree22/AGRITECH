@@ -83,7 +83,7 @@ export const AINegotiationTool: React.FC = () => {
   };
 
   return (
-    <div className="bg-white rounded-3xl border border-[#064e3b15] shadow-xl shadow-[#064e3b08] p-6 text-[#064e3b] space-y-6">
+    <div className="bg-white/85 backdrop-blur-md rounded-3xl border border-white/80 shadow-xl shadow-emerald-950/5 p-6 text-[#064e3b] space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#064e3b10]">
         <div className="flex items-center gap-3">

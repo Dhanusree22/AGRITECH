@@ -13,6 +13,7 @@ import { MarketplacePage } from './pages/MarketplacePage';
 import { AIChatbotWidget } from './components/ai/AIChatbotWidget';
 import { GlobalVoiceButton } from './components/voice/GlobalVoiceButton';
 import { VoiceAssistantModal } from './components/voice/VoiceAssistantModal';
+import { Agri3DBackground } from './components/3d/Agri3DBackground';
 
 const AppContent: React.FC = () => {
   const { user } = useAuth();
@@ -44,7 +45,10 @@ const AppContent: React.FC = () => {
       return <LandingPage navigate={navigate} />;
     }
     if (currentPath === '/login' || currentPath === '/auth') {
-      return <AuthPage navigate={navigate} />;
+      return <AuthPage navigate={navigate} initialMode="login" />;
+    }
+    if (currentPath === '/register') {
+      return <AuthPage navigate={navigate} initialMode="register" />;
     }
     if (currentPath === '/marketplace') {
       return <MarketplacePage navigate={navigate} />;
@@ -64,12 +68,14 @@ const AppContent: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#f1f5f2] text-[#064e3b] font-sans flex flex-col justify-between selection:bg-emerald-200 selection:text-[#064e3b] relative overflow-x-hidden">
-      {/* Immersive UI Ambient Background Glows */}
-      <div className="fixed inset-0 z-0 opacity-40 pointer-events-none overflow-hidden">
-        <div className="absolute top-20 right-10 w-[500px] h-[500px] bg-gradient-to-br from-[#10b98125] to-transparent rounded-full blur-[100px]" />
-        <div className="absolute bottom-0 left-[-100px] w-[600px] h-[600px] bg-gradient-to-tr from-[#34d39920] to-transparent rounded-full blur-[120px]" />
-        <div className="absolute top-1/2 left-1/3 w-[450px] h-[450px] bg-gradient-to-br from-emerald-200/30 to-transparent rounded-full blur-[110px]" />
+    <div className="min-h-screen bg-[#f4f7f5]/80 text-[#064e3b] font-sans flex flex-col justify-between selection:bg-emerald-200 selection:text-[#064e3b] relative overflow-x-hidden">
+      {/* 3D Dynamic Agricultural Living Background across ALL web pages and modules */}
+      <Agri3DBackground currentPath={currentPath} />
+
+      {/* Subtle UI Ambient Light Glows */}
+      <div className="fixed inset-0 z-0 opacity-25 pointer-events-none overflow-hidden">
+        <div className="absolute top-20 right-10 w-[500px] h-[500px] bg-gradient-to-br from-[#10b98118] to-transparent rounded-full blur-[100px]" />
+        <div className="absolute bottom-0 left-[-100px] w-[600px] h-[600px] bg-gradient-to-tr from-[#34d39915] to-transparent rounded-full blur-[120px]" />
       </div>
 
       <div className="relative z-10 flex flex-col min-h-screen justify-between">

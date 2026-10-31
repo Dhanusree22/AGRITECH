@@ -1,12 +1,24 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { Mic, Sparkles } from 'lucide-react';
+import { Mic } from 'lucide-react';
 import { VoiceAssistantModal } from './VoiceAssistantModal';
 import { useLanguage } from '../../context/LanguageContext';
 
-export const GlobalVoiceButton: React.FC = () => {
+interface GlobalVoiceButtonProps {
+  onClick?: () => void;
+}
+
+export const GlobalVoiceButton: React.FC<GlobalVoiceButtonProps> = ({ onClick }) => {
   const [isOpen, setIsOpen] = useState(false);
   const { currentLanguageConfig } = useLanguage();
+
+  const handleClick = () => {
+    if (onClick) {
+      onClick();
+    } else {
+      setIsOpen(true);
+    }
+  };
 
   return (
     <>
@@ -18,22 +30,23 @@ export const GlobalVoiceButton: React.FC = () => {
         <motion.button
           whileHover={{ scale: 1.08 }}
           whileTap={{ scale: 0.94 }}
-          onClick={() => setIsOpen(true)}
-          className="relative group p-4 rounded-full bg-gradient-to-r from-emerald-600 to-teal-500 text-white shadow-2xl shadow-emerald-700/50 flex items-center justify-center border-2 border-white/20"
-          title="AgriAI Voice Assistant (Multilingual)"
+          onClick={handleClick}
+          className="relative group p-4 rounded-full bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white shadow-2xl shadow-emerald-700/50 flex items-center justify-center border-2 border-white/20 cursor-pointer"
+          title={`AgriAI Voice Assistant (${currentLanguageConfig.nativeName})`}
         >
           {/* Pulsing ring animation */}
           <span className="absolute inset-0 rounded-full bg-emerald-400 opacity-40 animate-ping -z-10" />
           <Mic className="w-6 h-6 group-hover:scale-110 transition-transform" />
 
           {/* Language Flag Badge */}
-          <span className="absolute -top-1 -right-1 text-xs bg-slate-900 border border-emerald-400/50 rounded-full px-1.5 py-0.5 shadow-md">
+          <span className="absolute -top-1 -right-1 text-xs bg-slate-900 border border-emerald-400/50 rounded-full px-1.5 py-0.5 shadow-md font-bold">
             {currentLanguageConfig.flag}
           </span>
         </motion.button>
       </motion.div>
 
-      <VoiceAssistantModal isOpen={isOpen} onClose={() => setIsOpen(false)} />
+      {/* Internal modal only rendered if not managed by parent */}
+      {!onClick && <VoiceAssistantModal isOpen={isOpen} onClose={() => setIsOpen(false)} />}
     </>
   );
 };
