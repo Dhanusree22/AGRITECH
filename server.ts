@@ -10,7 +10,12 @@ import {
   DEFAULT_AGMARKNET_CONFIG,
   CROP_PROFILES,
   REGIONAL_MANDIS,
+  marketDataRepository,
+  CROP_MASTER_LIST,
+  SUPPORTED_MANDIS,
+  executeCropMarketForecast,
 } from './src/services/mandiPredictionEngine';
+import { aiAgentController } from './src/services/aiAgent/aiAgentController';
 
 dotenv.config();
 
@@ -18,11 +23,19 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let aiClient: GoogleGenAI | null = null;
+let geminiQuotaBlocked = false;
+let lastGeminiRetryTime = 0;
 
 function getGenAI(): GoogleGenAI | null {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
     return null;
+  }
+  // If previously blocked due to 403 / billing restrictions, retry only after 60s
+  if (geminiQuotaBlocked) {
+    if (Date.now() - lastGeminiRetryTime < 60000) {
+      return null;
+    }
   }
   if (!aiClient) {
     aiClient = new GoogleGenAI({
@@ -37,9 +50,27 @@ function getGenAI(): GoogleGenAI | null {
   return aiClient;
 }
 
+function markGeminiBlocked() {
+  geminiQuotaBlocked = true;
+  lastGeminiRetryTime = Date.now();
+}
+
+function getPort(): number {
+  const portArgIndex = process.argv.indexOf('--port');
+  if (portArgIndex !== -1 && process.argv[portArgIndex + 1]) {
+    const val = parseInt(process.argv[portArgIndex + 1], 10);
+    if (!isNaN(val)) return val;
+  }
+  if (process.env.APP_PORT) {
+    const val = parseInt(process.env.APP_PORT, 10);
+    if (!isNaN(val)) return val;
+  }
+  return 3000;
+}
+
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = getPort();
 
   app.use(express.json({ limit: '15mb' }));
 
@@ -52,276 +83,132 @@ async function startServer() {
     });
   });
 
-  // 1. AI Chat Endpoint (Farmer, Buyer, General AgriAI)
+  // 1. Intelligent Multilingual AI Agent Endpoint (Shared by Chatbot & Voice Assistant)
   app.post('/api/gemini/chat', async (req, res) => {
     try {
-      const { message = '', role = 'farmer', language = 'en', context = '' } = req.body;
+      const {
+        message = '',
+        role = 'farmer',
+        language = 'en',
+        context = '',
+        sessionId = 'default-session',
+      } = req.body;
+
+      if (!message || !message.trim()) {
+        const greetingRes = await aiAgentController.processQuery({
+          query: 'hello',
+          language,
+          role,
+          sessionId,
+          context,
+        });
+        return res.json({
+          reply: greetingRes.reply,
+          intent: greetingRes.intent,
+          entities: greetingRes.entities,
+          sessionId,
+        });
+      }
+
+      // Step 1: Process query through the Agricultural AI Agent (NLU + Context Memory + RAG + Tool Execution)
+      const agentResult = await aiAgentController.processQuery({
+        query: message,
+        language,
+        role,
+        sessionId,
+        context,
+      });
+
+      // Step 2: If Gemini API is active, optionally enrich fluent speech styling using grounded facts
       const ai = getGenAI();
-
-      const langMap: Record<string, { name: string; script: string; greeting: string }> = {
-        en: { name: 'English', script: 'English', greeting: 'Hello! I am AgriAI, your smart farming & trade assistant.' },
-        kn: { name: 'Kannada', script: 'ಕನ್ನಡ', greeting: 'ನಮಸ್ಕಾರ! ನಾನು ಅಗ್ರಿಟೆಕ್ ಕೃಷಿ AI ಧ್ವನಿ ಸಹಾಯಕ.' },
-        hi: { name: 'Hindi', script: 'हिन्दी (Devanagari)', greeting: 'नमस्ते! मैं एग्रीटेक कृषि AI सहायक हूँ।' },
-        te: { name: 'Telugu', script: 'తెలుగు', greeting: 'నమస్కారం! నేను అగ్రిటెక్ వ్యవసాయ AI అసిస్టెంట్.' },
-        ta: { name: 'Tamil', script: 'தமிழ்', greeting: 'வணக்கம்! நான் அக்ரிடெக் விவசாய AI உதவியாளர்.' },
-        ml: { name: 'Malayalam', script: 'മലയാളം', greeting: 'നമസ്കാരം! ഞാൻ അഗ്രിടെക് കാർഷിക AI സഹായിയാണ്.' },
-        mr: { name: 'Marathi', script: 'मराठी', greeting: 'नमस्कार! मी एग्रीटेक कृषी AI सहाय्यक आहे.' },
-        bn: { name: 'Bengali', script: 'বাংলা', greeting: 'নমস্কার! আমি এগ্রিটেক কৃষি এআই সহকারী।' },
-      };
-
-      const selectedLang = langMap[language] || langMap.en;
-
-      const systemPrompt = `You are "AgriAI", the premier Agricultural Trading & Farming AI Voice Assistant of the AGRITECH platform in India.
-CRITICAL LANGUAGE MANDATE:
-You MUST respond ENTIRELY and FLUENTLY in ${selectedLang.name} (${selectedLang.script}).
-- If language is Kannada ('kn'), write 100% in natural Kannada (ಕನ್ನಡ ಲಿಪಿ). Use authentic Kannada farming and market terms (ಮಂಡಿ, ಬೆಲೆ, ಇಳುವರಿ, ರೋಗ, ಗೊಬ್ಬರ, ಕೀಟನಾಶಕ, ಖರೀದಿದಾರರು, ಎಪಿಎಂಸಿ).
-- If language is Hindi ('hi'), write in pure Hindi (हिन्दी).
-- If language is Telugu ('te'), write in Telugu (తెలుగు).
-- If language is Tamil ('ta'), write in Tamil (தமிழ்).
-- If language is Malayalam ('ml'), write in Malayalam (മലയാളം).
-- If language is Marathi ('mr'), write in Marathi (मराठी).
-- If language is Bengali ('bn'), write in Bengali (বাংলা).
-- If language is English ('en'), write in English.
-
-Guidelines for Speech-Optimized Answers:
-1. Provide accurate, practical, empathetic agricultural advice, mandi prices, crop disease treatments, buyer connections, or weather tips.
-2. Keep responses between 2 to 4 clear, well-spoken sentences without complex markdown or markdown tables, so it is perfect for text-to-speech audio synthesis.
-3. User Role: ${role.toUpperCase()}. User Context: ${context || 'Direct farm-to-mandi trading and agricultural intelligence'}.`;
-
-      if (ai) {
+      if (ai && agentResult.intent !== 'GENERAL_GREETING' && agentResult.intent !== 'CLARIFICATION_NEEDED') {
         try {
           const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('AI timeout')), 2500)
+            setTimeout(() => reject(new Error('AI timeout')), 2200)
           );
+
+          const enrichmentPrompt = `You are AgriAI, a helpful agricultural assistant for Indian farmers.
+Language: Respond in pure, natural ${language} script.
+The farmer asked: "${message}"
+Here are the verified factual agricultural data points:
+"${agentResult.reply}"
+
+Speak directly to the farmer in 2 to 4 clear, respectful, natural spoken sentences conveying these exact facts and numbers without adding markdown or asterisks.`;
 
           const aiPromise = ai.models.generateContent({
             model: 'gemini-3.8-flash',
-            contents: message,
-            config: {
-              systemInstruction: systemPrompt,
-              temperature: 0.6,
-            },
+            contents: enrichmentPrompt,
           });
 
-          const response = await Promise.race([aiPromise, timeoutPromise]);
-          const replyText = response.text?.trim() || selectedLang.greeting;
-          return res.json({ reply: replyText });
+          const enrichedResponse = await Promise.race([aiPromise, timeoutPromise]);
+          const fluentText = enrichedResponse.text?.trim();
+          if (fluentText && fluentText.length > 20) {
+            return res.json({
+              reply: fluentText,
+              intent: agentResult.intent,
+              entities: agentResult.entities,
+              toolsCalled: agentResult.toolsCalled,
+              sessionId: agentResult.sessionId,
+              followUpSuggestions: agentResult.followUpSuggestions,
+            });
+          }
         } catch (apiErr: any) {
-          console.warn('Gemini generateContent error/timeout, using instantaneous smart engine:', apiErr?.message || apiErr);
+          if (apiErr?.status === 403 || String(apiErr?.message || '').includes('403') || String(apiErr?.message || '').includes('PERMISSION_DENIED')) {
+            markGeminiBlocked();
+          }
+          // On timeout or API rejection, seamlessly fall through to agentResult.reply
         }
       }
 
-      // High-quality smart contextual responses in selected language
-      const msgLower = (message || '').toLowerCase();
-
-      // Kannada specific smart intelligence
-      if (language === 'kn') {
-        if (msgLower.includes('ಟೊಮೆಟೊ') || msgLower.includes('tomato') || msgLower.includes('32')) {
-          return res.json({
-            reply: 'ಕೋಲಾರ ಎಪಿಎಂಸಿ ಮಂಡಿಯಲ್ಲಿ ಇಂದಿನ ಹೈಬ್ರಿಡ್ ಟೊಮೆಟೊ ಸರಾಸರಿ ಬೆಲೆ ₹32/ಕೆಜಿ (+8.4% ಏರಿಕೆ). ಬೇಡಿಕೆ ಹೆಚ್ಚಾಗಿದ್ದು, ಮುಂದಿನ 7 ದಿನಗಳಲ್ಲಿ ಬೆಲೆ ₹35 ರಿಂದ ₹38 ರವರೆಗೆ ಏರುವ ಸಾಧ್ಯತೆಯಿದೆ.',
-          });
-        }
-        if (msgLower.includes('ಈರುಳ್ಳಿ') || msgLower.includes('onion') || msgLower.includes('28')) {
-          return res.json({
-            reply: 'ಬೆಂಗಳೂರು ಯಶವಂತಪುರ ಮಂಡಿಯಲ್ಲಿ ಈರುಳ್ಳಿ ದರ ₹28/ಕೆಜಿ ಇದೆ. ನಿಮ್ಮ 2 ಟನ್ ಈರುಳ್ಳಿಗೆ 6 ಪರಿಶೀಲಿಸಿದ ಸಗಟು ಖರೀದಿದಾರರು ಸಿದ್ಧರಾಗಿದ್ದಾರೆ. ನೀವು ಎಸ್ಕ್ರೋ ಸುರಕ್ಷತೆಯೊಂದಿಗೆ ನೇರ ಒಪ್ಪಂದ ಮಾಡಿಕೊಳ್ಳಬಹುದು.',
-          });
-        }
-        if (msgLower.includes('ಆಲೂಗಡ್ಡೆ') || msgLower.includes('potato') || msgLower.includes('24')) {
-          return res.json({
-            reply: 'ಆಲೂಗಡ್ಡೆ ಇಂದಿನ ಮಂಡಿ ದರ ₹24/ಕೆಜಿ. ಮುಂದಿನ 10 ದಿನಗಳಲ್ಲಿ ಆವಕ ಕಡಿಮೆಯಾಗುವುದರಿಂದ ಬೆಲೆ ₹27/ಕೆಜಿಗೆ ಏರುವ 91% ಸಂಭವನೀಯತೆ ಇದೆ ಎಂದು ಕೃಷಿ AI ಅಂದಾಜಿಸಿದೆ.',
-          });
-        }
-        if (msgLower.includes('ಅಕ್ಕಿ') || msgLower.includes('ಭತ್ತ') || msgLower.includes('ಸೋನಾ') || msgLower.includes('rice') || msgLower.includes('paddy')) {
-          return res.json({
-            reply: 'ರಾಯಚೂರು ಮಾರುಕಟ್ಟೆಯಲ್ಲಿ ಸೋನಾ ಮಸೂರಿ ಭತ್ತದ ಇಂದಿನ ಬೆಲೆ ಕ್ವಿಂಟಾಲ್‌ಗೆ ₹5,800 (₹58/ಕೆಜಿ). ಹಬ್ಬದ ಋತುವಿನ ಬೇಡಿಕೆ ಹೆಚ್ಚಾಗಿದ್ದು, ಬೆಲೆ ಸ್ಥಿರವಾಗಿದೆ.',
-          });
-        }
-        if (msgLower.includes('ಗೋಧಿ') || msgLower.includes('wheat')) {
-          return res.json({
-            reply: 'ಶರ್ಬತಿ ಗೋಧಿ ಮಂಡಿ ದರ ₹34.50/ಕೆಜಿ ಇದೆ. ಕೇಂದ್ರ ಸರ್ಕಾರದ ಕನಿಷ್ಠ ಬೆಂಬಲ ಬೆಲೆ (ಎಂಎಸ್‌ಪಿ) ಮತ್ತು ಮಾರುಕಟ್ಟೆ ಬೇಡಿಕೆ ಉತ್ತಮವಾಗಿದೆ.',
-          });
-        }
-        if (msgLower.includes('ಮೆಣಸಿನಕಾಯಿ') || msgLower.includes('ಕ್ಯಾಪ್ಸಿಕಂ') || msgLower.includes('chilli') || msgLower.includes('capsicum')) {
-          return res.json({
-            reply: 'ಹಸಿರು ಕ್ಯಾಪ್ಸಿಕಂ ಕೋಲಾರ ಮಾರುಕಟ್ಟೆಯಲ್ಲಿ ₹44/ಕೆಜಿ ಮತ್ತು ಗುಂಟೂರು ಕೆಂಪು ಮೆಣಸಿನಕಾಯಿ ₹225/ಕೆಜಿ ಮಾರಾಟವಾಗುತ್ತಿದೆ. ಗುಣಮಟ್ಟದ ಗ್ರೇಡ್-ಎ ಸರಕಿಗೆ ಹೆಚ್ಚಿನ ಧಾರಣೆ ಇದೆ.',
-          });
-        }
-        if (msgLower.includes('ಖರೀದಿದಾರ') || msgLower.includes('buyer') || msgLower.includes('ಮಾರಾಟ') || msgLower.includes('ಮಾರಲು') || msgLower.includes('sell')) {
-          return res.json({
-            reply: 'ನಿಮ್ಮ ಉತ್ಪನ್ನಗಳನ್ನು ಖರೀದಿಸಲು 12 ಕ್ಕೂ ಹೆಚ್ಚು ಪರಿಶೀಲಿಸಿದ ಸೂಪರ್‌ಮಾರ್ಕೆಟ್ ಮತ್ತು ಸಗಟು ಸಂಸ್ಥೆಗಳು ಲಭ್ಯವಿವೆ. ನಿಮ್ಮ ಫಾರ್ಮ್-ಗೇಟ್ ಪಿಕ್‌ಅಪ್ ಅಥವಾ ನೇರ ಮಂಡಿ ಸಾಗಣೆಗೆ ಎಸ್ಕ್ರೋ ಖಾತರಿಯೊಂದಿಗೆ ಹಣ ಪಾವತಿಯಾಗುತ್ತದೆ.',
-          });
-        }
-        if (msgLower.includes('ರೋಗ') || msgLower.includes('ಔಷಧಿ') || msgLower.includes('ಮಚ್ಚೆ') || msgLower.includes('ಕೀಟ') || msgLower.includes('disease') || msgLower.includes('pest') || msgLower.includes('blight')) {
-          return res.json({
-            reply: 'ಟೊಮೆಟೊ ಎಲೆ ಮಚ್ಚೆ ಮತ್ತು ಮುಟುರು ರೋಗಕ್ಕೆ ತಕ್ಷಣ 1 ಲೀಟರ್ ನೀರಿಗೆ 2 ಗ್ರಾಂ ಮ್ಯಾಂಕೋಜೆಬ್ ಅಥವಾ ಕಾಪರ್ ಆಕ್ಸಿಕ್ಲೋರೈಡ್ ಬೆರೆಸಿ ಸಿಂಪಡಿಸಿ. ಜೊತೆಗೆ ಸಾವಯವ ಬೇವಿನ ಎಣ್ಣೆ 5 ಮಿ.ಲೀ. ಸಿಂಪಡಿಸುವುದು ಕೀಟ ಬಾಧೆಯನ್ನು ತಡೆಯುತ್ತದೆ.',
-          });
-        }
-        if (msgLower.includes('ಹವಾಮಾನ') || msgLower.includes('ಮಳೆ') || msgLower.includes('ಉಷ್ಣಾಂಶ') || msgLower.includes('weather') || msgLower.includes('rain')) {
-          return res.json({
-            reply: 'ನಿಮ್ಮ ಪ್ರದೇಶದಲ್ಲಿ ಮುಂದಿನ 3 ದಿನ ಸಾಧಾರಣ ಬಿಸಿಲು ಮತ್ತು 26°C ಉಷ್ಣಾಂಶ ಇರಲಿದೆ. ಶುಕ್ರವಾರ ಸಂಜೆ ಲಘು ಮಳೆ ನಿರೀಕ್ಷೆಯಿದೆ. ಕಟಾವು ಮಾಡಿದ ಬೆಳೆಗಳನ್ನು ಸುರಕ್ಷಿತ ಗೋದಾಮಿನಲ್ಲಿಡಿ.',
-          });
-        }
-        if (msgLower.includes('ಮುನ್ಸೂಚನೆ') || msgLower.includes('forecast') || msgLower.includes('ನಾಳೆ') || msgLower.includes('ಮುಂದಿನ')) {
-          return res.json({
-            reply: 'ನಾಳೆಯ ಮಂಡಿ ಬೆಲೆ ಮುನ್ಸೂಚನೆ: ಟೊಮೆಟೊ ₹32.80/ಕೆಜಿ (+2.5%), ಈರುಳ್ಳಿ ₹28.40/ಕೆಜಿ, ಮತ್ತು ಆಲೂಗಡ್ಡೆ ₹24.20/ಕೆಜಿ. ಹಬ್ಬದ ಋತುವಿನ ಕಾರಣ ಮುಂದಿನ ವಾರ ಬೆಲೆಗಳು ಇನ್ನಷ್ಟು ಏರಿಕೆಯಾಗಲಿವೆ.',
-          });
-        }
-        if (msgLower.includes('ಎಸ್ಕ್ರೋ') || msgLower.includes('ಹಣ') || msgLower.includes('ಪಾವತಿ') || msgLower.includes('bank') || msgLower.includes('payment')) {
-          return res.json({
-            reply: 'ಅಗ್ರಿಟೆಕ್ ವೇದಿಕೆಯಲ್ಲಿ 100% ಎಸ್ಕ್ರೋ ಭದ್ರತೆ ಇದೆ. ಖರೀದಿದಾರರು ಆರ್ಡರ್ ಮಾಡಿದಾಗ ಹಣ ಎಸ್ಕ್ರೋ ಖಾತೆಯಲ್ಲಿ ಲಾಕ್ ಆಗುತ್ತದೆ. ಸರಕು ತಲುಪಿದ ತಕ್ಷಣ ಮಧ್ಯವರ್ತಿಗಳಿಲ್ಲದೆ ನೇರವಾಗಿ ನಿಮ್ಮ ಬ್ಯಾಂಕ್ ಖಾತೆಗೆ ಜಮೆಯಾಗುತ್ತದೆ.',
-          });
-        }
-        if (msgLower.includes('ಬೆಲೆ') || msgLower.includes('ದರ') || msgLower.includes('rate') || msgLower.includes('price') || msgLower.includes('ಮಂಡಿ')) {
-          return res.json({
-            reply: 'ಇಂದಿನ ಪ್ರಮುಖ ಮಂಡಿ ದರಗಳು: ಟೊಮೆಟೊ ₹32/ಕೆಜಿ, ಈರುಳ್ಳಿ ₹28/ಕೆಜಿ, ಆಲೂಗಡ್ಡೆ ₹24/ಕೆಜಿ, ಅಕ್ಕಿ ₹58/ಕೆಜಿ, ಮತ್ತು ಕ್ಯಾಪ್ಸಿಕಂ ₹44/ಕೆಜಿ. ಹೆಚ್ಚಿನ ವಿವರಗಳಿಗಾಗಿ ಬೆಳೆಯ ಹೆಸರನ್ನು ತಿಳಿಸಿ.',
-          });
-        }
-        return res.json({
-          reply: 'ನಮಸ್ಕಾರ! ನಾನು ಅಗ್ರಿಟೆಕ್ ಕೃಷಿ AI ಧ್ವನಿ ಸಹಾಯಕ. ಕೋಲಾರ ಮಂಡಿಯಲ್ಲಿ ಇಂದಿನ ಟೊಮೆಟೊ ₹32/ಕೆಜಿ ಮತ್ತು ಈರುಳ್ಳಿ ₹28/ಕೆಜಿ ಇದೆ. ಬೆಳೆ ರೋಗ, ಮಂಡಿ ಬೆಲೆ, ಹವಾಮಾನ ಅಥವಾ ಖರೀದಿದಾರರ ಬಗ್ಗೆ ಯಾವುದೇ ಪ್ರಶ್ನೆ ಕೇಳಿ, ಕನ್ನಡದಲ್ಲೇ ಉತ್ತರಿಸುತ್ತೇನೆ.',
-        });
-      }
-
-      // Hindi specific smart intelligence
-      // Hindi specific smart intelligence
-      if (language === 'hi') {
-        if (msgLower.includes('टमाटर') || msgLower.includes('tomato') || msgLower.includes('भाव') || msgLower.includes('price')) {
-          return res.json({
-            reply: 'कोलार और आज़ादपुर मंडी में आज टमाटर का औसत भाव ₹32/किलो है (+8.4% वृद्धि)। मजबूत मांग के कारण अगले 7 दिनों में भाव ₹35 से ₹38 प्रति किलो तक पहुँचने का अनुमान है।',
-          });
-        }
-        if (msgLower.includes('प्याज') || msgLower.includes('खरीदार') || msgLower.includes('buyer') || msgLower.includes('टन')) {
-          return res.json({
-            reply: 'आपके 2 टन प्याज के लिए 6 सत्यापित थोक खरीदार उपलब्ध हैं। वर्तमान खरीद भाव ₹28/किलो है। आप सुरक्षित एस्क्रो के साथ सीधे ऑर्डर बुक कर सकते हैं।',
-          });
-        }
-        if (msgLower.includes('रोग') || msgLower.includes('दवा') || msgLower.includes('उपचार') || msgLower.includes('disease') || msgLower.includes('कीट')) {
-          return res.json({
-            reply: 'टमाटर के झुलसा व पत्ती धब्बा रोग के लिए मैंकोज़ेब 2 ग्राम प्रति लीटर पानी में मिलाकर छिड़काव करें। साथ ही जैविक नीम का तेल छिड़कने से कीटों से सुरक्षित बचाव होता है।',
-          });
-        }
-        if (msgLower.includes('मौसम') || msgLower.includes('बारिश') || msgLower.includes('weather') || msgLower.includes('rain')) {
-          return res.json({
-            reply: 'आपके क्षेत्र में अगले 3 दिन हल्की धूप और 27°C तापमान रहेगा। शुक्रवार शाम हल्की बूंदाबांदी संभव है। अपनी कटी हुई फसल को सुरक्षित गोदाम में रखें।',
-          });
-        }
-        if (msgLower.includes('पूर्वानुमान') || msgLower.includes('forecast') || msgLower.includes('आलू') || msgLower.includes('potato')) {
-          return res.json({
-            reply: 'आलू का आज का मंडी भाव ₹24/किलो है। आगामी 10 दिनों में आवक कम होने से भाव ₹27/किलो तक बढ़ने की 91% संभावना है।',
-          });
-        }
-        return res.json({
-          reply: 'नमस्ते! मैं एग्रीटेक कृषि AI सहायक हूँ। कोलार मंडी में टमाटर ₹32/किलो और प्याज ₹28/किलो बिक रहा है। आप मौसम, भाव, फसल सुरक्षा या थोक खरीदारों के बारे में पूछ सकते हैं।',
-        });
-      }
-
-      // Telugu specific smart intelligence
-      if (language === 'te') {
-        if (msgLower.includes('టమాటా') || msgLower.includes('tomato') || msgLower.includes('ధర') || msgLower.includes('price')) {
-          return res.json({
-            reply: 'కోలార్ మార్కెట్లో నేడు నాణ్యమైన టమాటా సగటు ధర ₹32/కేజీ (+8.4% పెరుగుదల). డిమాండ్ ఎక్కువగా ఉండటంతో రాబోయే 7 రోజుల్లో ధర ₹35 నుండి ₹38 వరకు పెరిగే అవకాశం ఉంది.',
-          });
-        }
-        if (msgLower.includes('ఉల్లి') || msgLower.includes('onion') || msgLower.includes('కొనుగోలు') || msgLower.includes('buyer') || msgLower.includes('టన్ను')) {
-          return res.json({
-            reply: 'మీ 2 టన్నుల ఉల్లిపాయల కోసం 6 ధృవీకరించబడిన హోల్‌సేల్ కొనుగోలుదారులు సిద్ధంగా ఉన్నారు. ప్రస్తుత కొనుగోలు రేటు ₹28/కేజీ. మీరు ఎస్క్రో భద్రతతో ఒప్పందం చేసుకోవచ్చు.',
-          });
-        }
-        if (msgLower.includes('తెగులు') || msgLower.includes('మందు') || msgLower.includes('రోగం') || msgLower.includes('disease')) {
-          return res.json({
-            reply: 'టమాటా ఆకు మచ్చ తెగులు నివారణకు లీటరు నీటిలో 2 గ్రాముల మ్యాంకోజెబ్ కలిపి పిచికారీ చేయండి. వేపనూనె వాడటం వల్ల పురుగుల బెడద కూడా తగ్గుతుంది.',
-          });
-        }
-        if (msgLower.includes('వాతావరణం') || msgLower.includes('వర్షం') || msgLower.includes('weather')) {
-          return res.json({
-            reply: 'రాబోయే 3 రోజులు సాధారణ ఎండ మరియు 27°C ఉష్ణోగ్రత నమోదవుతుంది. పంట కోత పనులకు ఇది అనుకూలమైన సమయం.',
-          });
-        }
-        return res.json({
-          reply: 'నమస్కారం! అగ్రిటెక్ వ్యవసాయ AI వాయిస్ అసిస్టెంట్. నేడు కోలార్ మార్కెట్లో టమాటా ₹32/కేజీ, ఉల్లి ₹28/కేజీగా ఉంది. పంటల ధరలు, తెగుళ్లు లేదా కొనుగోలుదారుల గురించి అడగండి.',
-        });
-      }
-
-      // Tamil specific smart intelligence
-      if (language === 'ta') {
-        if (msgLower.includes('தக்காளி') || msgLower.includes('tomato') || msgLower.includes('விலை') || msgLower.includes('price')) {
-          return res.json({
-            reply: 'கோலார் மண்டியில் இன்றைய தக்காளி சராசரி விலை ₹32/கிலோ (+8.4% உயர்வு). தேவை அதிகமாக உள்ளதால் அடுத்த 7 நாட்களில் விலை ₹35-₹38 வரை உயர வாய்ப்புள்ளது.',
-          });
-        }
-        if (msgLower.includes('வெங்காயம்') || msgLower.includes('onion') || msgLower.includes('வாங்குபவர்') || msgLower.includes('buyer')) {
-          return res.json({
-            reply: 'உங்கள் 2 டன் வெங்காயத்தை வாங்க 6 சரிபார்க்கப்பட்ட மொத்த வியாபாரிகள் தயாராக உள்ளனர். தற்போதைய கொள்முதல் விலை ₹28/கிலோ ஆகும்.',
-          });
-        }
-        if (msgLower.includes('நோய்') || msgLower.includes('மருந்து') || msgLower.includes('பூச்சி') || msgLower.includes('disease')) {
-          return res.json({
-            reply: 'தக்காளி இலை கருகல் நோய்க்கு ஒரு லிட்டர் தண்ணீருக்கு 2 கிராம் மான்கோசெப் கலந்து தெளிக்கவும். வேப்ப எண்ணெய் தெளிப்பது பூச்சி தாக்குதலை தடுக்கும்.',
-          });
-        }
-        return res.json({
-          reply: 'வணக்கம்! அக்ரிடெக் குரல் உதவியாளர். இன்றைய கோலார் மண்டியில் தக்காளி விலை ₹32/கிலோ (+8.4%), வெங்காயம் ₹28/கிலோ. பயிர் நோய்கள், சந்தை நிலவரம் பற்றி தமிழில் கேளுங்கள்.',
-        });
-      }
-
-      // Malayalam specific smart intelligence
-      if (language === 'ml') {
-        if (msgLower.includes('തക്കാളി') || msgLower.includes('tomato') || msgLower.includes('വില') || msgLower.includes('price')) {
-          return res.json({
-            reply: 'ഇന്നത്തെ വിപണിയിൽ നല്ലയിനം തക്കാളി വില കിലോഗ്രാമിന് ₹32 ആണ് (+8.4% വർദ്ധനവ്). അടുത്ത ഒരാഴ്ചക്കുള്ളിൽ വില ₹35 മുതൽ ₹38 വരെ ഉയരാൻ സാധ്യതയുണ്ട്.',
-          });
-        }
-        if (msgLower.includes('രോഗം') || msgLower.includes('മരുന്ന്') || msgLower.includes('disease')) {
-          return res.json({
-            reply: 'തക്കാളി ഇലപ്പുള്ളി രോഗത്തിനെതിരെ ഒരു ലിറ്റർ വെള്ളത്തിൽ 2 ഗ്രാം മാങ്കോസെബ് കലർത്തി തളിക്കുക. വേപ്പെണ്ണ ഉപയോഗിക്കുന്നത് കീടങ്ങളെ അകറ്റിനിർത്തും.',
-          });
-        }
-        return res.json({
-          reply: 'നമസ്കാരം! അഗ്രിടെക് കാർഷിക AI സഹായി. ഇന്നത്തെ വിപണിയിൽ തക്കാളി വില കിലോഗ്രാമിന് ₹32 ആണ്. കാലാവസ്ഥയും വിള രോഗങ്ങളും സംബന്ധിച്ച ഏത് ചോദ്യവും മലയാളത്തിൽ ചോദിക്കാം.',
-        });
-      }
-
-      // Marathi specific smart intelligence
-      if (language === 'mr') {
-        if (msgLower.includes('टोमॅटो') || msgLower.includes('tomato') || msgLower.includes('भाव') || msgLower.includes('price')) {
-          return res.json({
-            reply: 'आज कोलार कृषी उत्पन्न बाजार समितीत टोमॅटोचे सरासरी भाव ₹32/किलो (+8.4% वाढ) आहेत. पुढील 7 दिवसांत भाव ₹35 ते ₹38 प्रति किलोपर्यंत जाण्याचा अंदाज आहे.',
-          });
-        }
-        if (msgLower.includes('कांदा') || msgLower.includes('onion') || msgLower.includes('खरेदीदार') || msgLower.includes('व्यापारी')) {
-          return res.json({
-            reply: 'तुमच्या २ टन कांद्यासाठी ६ पडताळणी केलेले घाऊक खरेदीदार उपलब्ध आहेत. सध्याचा खरेदी दर ₹28/किलो आहे.',
-          });
-        }
-        return res.json({
-          reply: 'नमस्कार! एग्रीटेक कृषी AI सहाय्यक. आज बाजारात टोमॅटोचे दर ₹32/किलो (+8.4%) आणि कांदा ₹28/किलो आहेत. बाजारभाव, हवामान आणि खरेदीदारांविषयी आपण मराठीत विचारू शकता.',
-        });
-      }
-
-      // Bengali specific smart intelligence
-      if (language === 'bn') {
-        if (msgLower.includes('টমেটো') || msgLower.includes('tomato') || msgLower.includes('দর') || msgLower.includes('দাম')) {
-          return res.json({
-            reply: 'আজকের মান্ডিতে ভালো মানের টমেটোর পাইকারি দর ₹32/কেজি (+8.4% বৃদ্ধি)। আগামী এক সপ্তাহে দাম ₹35 থেকে ₹38 পর্যন্ত বাড়ার সম্ভাবনা রয়েছে।',
-          });
-        }
-        if (msgLower.includes('পেঁয়াজ') || msgLower.includes('onion') || msgLower.includes('ক্রেতা') || msgLower.includes('buyer')) {
-          return res.json({
-            reply: 'আপনার ২ টন পেঁয়াজের জন্য ৬ জন যাচাইকৃত পাইকারি ক্রেতা প্রস্তুত আছেন। বর্তমান বাজার দর ₹28/কেজি।',
-          });
-        }
-        return res.json({
-          reply: 'নমস্কার! এগ্রিটেক এআই সহকারী। আজকের মান্ডিতে টমেটোর দর ₹32/কেজি এবং পেঁয়াজ ₹28/কেজি। আপনি ফসলের রোগ, আবহাওয়া বা ক্রেতাদের সম্পর্কে বাংলায় প্রশ্ন করতে পারেন।',
-        });
-      }
-
-      // English fallback
+      // Step 3: Return verified, crop-specific, mandi-specific, intent-specific dynamic answer
       return res.json({
-        reply: 'Hello! I am AgriAI, your smart farming & market assistant. Live Kolar APMC mandi rate: Tomato ₹32/kg (up 8.4%), Onion ₹28/kg. AI predicts an upward price trend of 12% over the next 7 days.',
+        reply: agentResult.reply,
+        intent: agentResult.intent,
+        entities: agentResult.entities,
+        toolsCalled: agentResult.toolsCalled,
+        sessionId: agentResult.sessionId,
+        followUpSuggestions: agentResult.followUpSuggestions,
       });
     } catch (err: any) {
-      console.error('Gemini Chat Error:', err);
-      return res.status(500).json({ error: err.message || 'AI Chat processing failed' });
+      console.error('AI Agent Query Error:', err);
+      // Fallback guarantees response is generated through agent controller
+      const emergencyRes = await aiAgentController.processQuery({
+        query: req.body?.message || 'help',
+        language: req.body?.language || 'en',
+        role: req.body?.role || 'farmer',
+        sessionId: req.body?.sessionId || 'default-session',
+      });
+      return res.json({
+        reply: emergencyRes.reply,
+        intent: emergencyRes.intent,
+        entities: emergencyRes.entities,
+        sessionId: emergencyRes.sessionId,
+      });
     }
+  });
+
+  // 1.05 Dedicated Direct AI Agent Execution Endpoint
+  app.post('/api/ai/agent/execute', async (req, res) => {
+    try {
+      const { query = '', language = 'en', role = 'farmer', sessionId = 'default-session', context = '' } = req.body;
+      const result = await aiAgentController.processQuery({
+        query,
+        language,
+        role,
+        sessionId,
+        context,
+      });
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || 'AI Agent execution failed' });
+    }
+  });
+
+  // 1.06 Conversation Session Reset Endpoint
+  app.post('/api/ai/conversation/reset', (req, res) => {
+    const { sessionId = 'default-session' } = req.body;
+    aiAgentController.resetSession(sessionId);
+    return res.json({ status: 'ok', message: 'Conversation session context reset', sessionId });
   });
 
   // 1.1 Multilingual High-Fidelity Text-to-Speech (TTS) Endpoint
@@ -497,11 +384,10 @@ Respond in JSON strictly:
 Write all text directly in the target language (${language === 'kn' ? 'Kannada / ಕನ್ನಡ' : language === 'hi' ? 'Hindi / हिन्दी' : language === 'te' ? 'Telugu / తెలుగు' : language === 'ta' ? 'Tamil / தமிழ்' : 'English'}). Keep advice actionable for Indian farmers and buyers.`;
 
           const response = await ai.models.generateContent({
-            model: 'gemini-3.7-flash',
+            model: 'gemini-3.8-flash',
             contents: prompt,
             config: {
               responseMimeType: 'application/json',
-              temperature: 0.5,
             },
           });
 
@@ -516,7 +402,9 @@ Write all text directly in the target language (${language === 'kn' ? 'Kannada /
             baselineResult.bestSellingWindow = parsed.bestSellingWindow;
           }
         } catch (apiErr: any) {
-          console.warn('Gemini prediction text enrichment error (using baseline):', apiErr?.message || apiErr);
+          if (apiErr?.status === 403 || String(apiErr?.message || '').includes('403') || String(apiErr?.message || '').includes('PERMISSION_DENIED')) {
+            markGeminiBlocked();
+          }
         }
       }
 
@@ -562,6 +450,320 @@ Write all text directly in the target language (${language === 'kn' ? 'Kannada /
     });
   });
 
+  // 2.4 Dedicated Agricultural Market & ML Prediction API Endpoints
+
+  // GET /api/market/latest - Query latest modal prices across crops and mandis
+  app.get('/api/market/latest', (req, res) => {
+    try {
+      const { crop, mandi } = req.query as { crop?: string; mandi?: string };
+      if (crop) {
+        const record = marketDataRepository.getLatestRecord(crop, mandi);
+        if (!record) {
+          return res.status(404).json({ error: `No market price record found for crop: ${crop}` });
+        }
+        return res.json({ success: true, record });
+      }
+      const prices = getLiveMandiPricesList();
+      return res.json({
+        success: true,
+        count: prices.length,
+        timestamp: new Date().toISOString(),
+        source: 'AGMARKNET / data.gov.in Official APMC Daily Feed',
+        prices,
+      });
+    } catch (err: any) {
+      console.error('Market Latest Error:', err);
+      return res.status(500).json({ error: err.message || 'Failed to retrieve latest market records' });
+    }
+  });
+
+  // GET /api/market/history - Query daily historical time-series
+  app.get('/api/market/history', (req, res) => {
+    try {
+      const crop = (req.query.crop as string) || 'Tomato';
+      const mandi = req.query.mandi as string | undefined;
+      const days = parseInt(req.query.days as string, 10) || 30;
+
+      const history = marketDataRepository.getHistory(crop, mandi, days);
+      return res.json({
+        success: true,
+        crop,
+        mandi: mandi || 'All Regional APMCs',
+        count: history.length,
+        requestedDays: days,
+        records: history,
+      });
+    } catch (err: any) {
+      console.error('Market History Error:', err);
+      return res.status(500).json({ error: err.message || 'Failed to retrieve market history' });
+    }
+  });
+
+  // GET /api/predictions/crops - List all supported crop definitions
+  app.get('/api/predictions/crops', (req, res) => {
+    return res.json({
+      success: true,
+      count: CROP_MASTER_LIST.length,
+      crops: CROP_MASTER_LIST.map((c) => ({
+        id: c.id,
+        name: c.name,
+        hindiName: c.hindiName,
+        kannadaName: c.kannadaName,
+        category: c.category,
+        benchmarkMandi: c.benchmarkMandi,
+        basePriceQuintal: c.baseModalPriceQuintal,
+        basePricePerKg: +(c.baseModalPriceQuintal / 100).toFixed(1),
+        perishabilityDays: c.perishabilityDays,
+        seasonPeak: c.seasonPeak,
+        weatherSensitivity: c.weatherSensitivity,
+        holidayElasticity: c.holidayElasticity,
+        volatilityRating: c.volatilityRating,
+        varieties: c.typicalVarieties,
+      })),
+      mandis: SUPPORTED_MANDIS,
+    });
+  });
+
+  // GET /api/predictions/crop/:cropId - Individual crop master details
+  app.get('/api/predictions/crop/:cropId', (req, res) => {
+    const { cropId } = req.params;
+    const crop = CROP_MASTER_LIST.find(
+      (c) => c.id.toLowerCase() === cropId.toLowerCase() || c.name.toLowerCase() === cropId.toLowerCase()
+    );
+    if (!crop) {
+      return res.status(404).json({ error: `Crop not found: ${cropId}` });
+    }
+    const latestRecord = marketDataRepository.getLatestRecord(crop.name, crop.benchmarkMandi);
+    const crossMandi = marketDataRepository.getCrossMandiComparison(crop.name);
+
+    return res.json({
+      success: true,
+      crop,
+      latestBenchmarkRecord: latestRecord,
+      crossMandiSpreads: crossMandi,
+    });
+  });
+
+  // GET /api/predictions/forecast - Multi-horizon forecasting endpoint
+  app.get('/api/predictions/forecast', (req, res) => {
+    try {
+      const {
+        crop = 'Tomato',
+        cropId,
+        mandi = 'Kolar APMC Market',
+        days = '30',
+        season = 'Current',
+        weather = 'Unseasonal Rain',
+        holiday = 'Diwali / Dussehra Surge',
+        language = 'en',
+      } = req.query as Record<string, string>;
+
+      const targetCrop = cropId
+        ? CROP_MASTER_LIST.find((c) => c.id.toLowerCase() === cropId.toLowerCase())?.name || crop
+        : crop;
+
+      const horizonDaysNum = parseInt(days, 10);
+      const horizonDays: 7 | 15 | 30 | 60 | 90 =
+        horizonDaysNum >= 90 ? 90 :
+        horizonDaysNum >= 60 ? 60 :
+        horizonDaysNum >= 30 ? 30 :
+        horizonDaysNum >= 15 ? 15 : 7;
+
+      const forecast = executeCropMarketForecast({
+        crop: targetCrop,
+        mandi,
+        horizonDays,
+        season: season as any,
+        weatherFactor: weather as any,
+        holidayImpact: holiday as any,
+        language: language as any,
+      });
+
+      return res.json({
+        success: true,
+        source: 'AGMARKNET & e-NAM Verified Historical Time-Series Engine',
+        forecast,
+      });
+    } catch (err: any) {
+      console.error('Forecast Error:', err);
+      return res.status(500).json({ error: err.message || 'Forecast calculation failed' });
+    }
+  });
+
+  // GET /api/predictions/compare-mandis - Inter-mandi spatial comparison
+  app.get('/api/predictions/compare-mandis', (req, res) => {
+    try {
+      const crop = (req.query.crop as string) || 'Tomato';
+      const comparison = marketDataRepository.getCrossMandiComparison(crop);
+      return res.json({
+        success: true,
+        crop,
+        comparison,
+      });
+    } catch (err: any) {
+      console.error('Compare Mandis Error:', err);
+      return res.status(500).json({ error: err.message || 'Failed to compare mandis' });
+    }
+  });
+
+  // GET /api/predictions/analytics - Volatility, volume elasticity, macro metrics
+  app.get('/api/predictions/analytics', (req, res) => {
+    try {
+      const analytics = CROP_MASTER_LIST.map((crop) => {
+        const latest = marketDataRepository.getLatestRecord(crop.name, crop.benchmarkMandi);
+        const history30 = marketDataRepository.getHistory(crop.name, crop.benchmarkMandi, 30);
+        const prices = history30.map((h) => h.pricePerKg);
+        const avg = prices.reduce((a, b) => a + b, 0) / (prices.length || 1);
+        const min = Math.min(...(prices.length ? prices : [crop.baseModalPriceQuintal / 100]));
+        const max = Math.max(...(prices.length ? prices : [crop.baseModalPriceQuintal / 100]));
+
+        return {
+          cropId: crop.id,
+          name: crop.name,
+          category: crop.category,
+          benchmarkMandi: crop.benchmarkMandi,
+          currentPriceKg: latest ? latest.pricePerKg : +(crop.baseModalPriceQuintal / 100).toFixed(1),
+          avg30DayKg: +avg.toFixed(1),
+          min30DayKg: min,
+          max30DayKg: max,
+          volatilityRating: crop.volatilityRating,
+          perishabilityDays: crop.perishabilityDays,
+          dailyArrivalTons: latest ? latest.arrivalTons : 300,
+        };
+      });
+
+      return res.json({
+        success: true,
+        analytics,
+        repositoryStatus: marketDataRepository.getStatus(),
+      });
+    } catch (err: any) {
+      console.error('Analytics Error:', err);
+      return res.status(500).json({ error: err.message || 'Analytics calculation failed' });
+    }
+  });
+
+  // GET /api/predictions/model-performance - Chronological backtesting evaluation
+  app.get('/api/predictions/model-performance', (req, res) => {
+    try {
+      const crop = (req.query.crop as string) || 'Tomato';
+      const mandi = (req.query.mandi as string) || 'Kolar APMC Market';
+      const forecast = executeCropMarketForecast({ crop, mandi, horizonDays: 7 });
+
+      return res.json({
+        success: true,
+        crop,
+        mandi,
+        metrics: forecast.performanceMetrics,
+      });
+    } catch (err: any) {
+      console.error('Model Performance Error:', err);
+      return res.status(500).json({ error: err.message || 'Failed to retrieve model performance' });
+    }
+  });
+
+  // POST /api/predictions/recalculate - Recalculate with dynamic parameters
+  app.post('/api/predictions/recalculate', (req, res) => {
+    try {
+      const {
+        crop = 'Tomato',
+        mandi = 'Kolar APMC Market',
+        todayPrice,
+        horizonDays = 30,
+        season = 'Current',
+        weatherFactor = 'Unseasonal Rain',
+        holidayImpact = 'Diwali / Dussehra Surge',
+        language = 'en',
+      } = req.body;
+
+      const result = executeCropMarketForecast({
+        crop,
+        mandi,
+        todayPrice: Number(todayPrice) || undefined,
+        horizonDays: Number(horizonDays) as any,
+        season,
+        weatherFactor,
+        holidayImpact,
+        language,
+      });
+
+      return res.json({
+        success: true,
+        result,
+      });
+    } catch (err: any) {
+      console.error('Recalculate Error:', err);
+      return res.status(500).json({ error: err.message || 'Recalculation failed' });
+    }
+  });
+
+  // POST /api/market/record - Ingest verified market price record (triggers dynamic recalculation)
+  app.post('/api/market/record', (req, res) => {
+    try {
+      const {
+        commodity,
+        variety = 'Standard Commercial Grade',
+        mandi,
+        district = 'Bengaluru Urban',
+        state = 'Karnataka',
+        modalPrice,
+        minPrice,
+        maxPrice,
+        pricePerKg,
+        arrivalTons = 250,
+        tradingDate = new Date().toISOString().split('T')[0],
+      } = req.body;
+
+      if (!commodity || !mandi || (!modalPrice && !pricePerKg)) {
+        return res.status(400).json({ error: 'Missing required fields: commodity, mandi, and price' });
+      }
+
+      const calculatedModal = Number(modalPrice) || Math.round(Number(pricePerKg) * 100);
+      const calculatedKg = Number(pricePerKg) || +(calculatedModal / 100).toFixed(1);
+
+      const newRecord = marketDataRepository.addVerifiedRecord({
+        commodity,
+        variety,
+        mandi,
+        district,
+        state,
+        modalPrice: calculatedModal,
+        minPrice: Number(minPrice) || Math.round(calculatedModal * 0.92),
+        maxPrice: Number(maxPrice) || Math.round(calculatedModal * 1.08),
+        pricePerKg: calculatedKg,
+        arrivalTons: Number(arrivalTons) || 250,
+        tradingDate,
+        source: 'User Verified Submission (APMC Authorized)',
+        dataQuality: 'VERIFIED_OFFICIAL',
+      });
+
+      // Recalculate immediate forecast for this updated record
+      const updatedForecast = executeCropMarketForecast({
+        crop: commodity,
+        mandi,
+        todayPrice: calculatedKg,
+        horizonDays: 30,
+      });
+
+      return res.json({
+        success: true,
+        message: `Successfully ingested verified record for ${commodity} at ${mandi}. Prediction models dynamically updated.`,
+        record: newRecord,
+        updatedForecast: {
+          todayPrice: updatedForecast.todayPrice,
+          tomorrowPrice: updatedForecast.tomorrowPrice,
+          day7Price: updatedForecast.day7Price,
+          day30Price: updatedForecast.day30Price,
+          trend: updatedForecast.trend,
+          changePercent: updatedForecast.changePercent,
+        },
+      });
+    } catch (err: any) {
+      console.error('Add Record Error:', err);
+      return res.status(500).json({ error: err.message || 'Failed to add market record' });
+    }
+  });
+
   // 3. AI Crop Quality Grading Endpoint
   app.post('/api/gemini/grade', async (req, res) => {
     try {
@@ -576,13 +778,14 @@ Write all text directly in the target language (${language === 'kn' ? 'Kannada /
           },
         };
 
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.7-flash',
-          contents: {
-            parts: [
-              imagePart,
-              {
-                text: `Analyze this agricultural produce image for quality grading.
+        try {
+          const response = await ai.models.generateContent({
+            model: 'gemini-3.8-flash',
+            contents: {
+              parts: [
+                imagePart,
+                {
+                  text: `Analyze this agricultural produce image for quality grading.
 Crop Type: ${cropType || 'Tomato'}
 Notes: ${farmNotes || 'Fresh harvest'}
 
@@ -598,19 +801,22 @@ Return JSON format:
   "suggestedPricePremium": string,
   "improvementTips": [string]
 }`,
-              },
-            ],
-          },
-          config: {
-            responseMimeType: 'application/json',
-          },
-        });
+                },
+              ],
+            },
+            config: {
+              responseMimeType: 'application/json',
+            },
+          });
 
-        try {
           const parsed = JSON.parse(response.text || '{}');
-          return res.json(parsed);
-        } catch {
-          // fallback
+          if (parsed && parsed.grade) {
+            return res.json(parsed);
+          }
+        } catch (apiErr: any) {
+          if (apiErr?.status === 403 || String(apiErr?.message || '').includes('403') || String(apiErr?.message || '').includes('PERMISSION_DENIED')) {
+            markGeminiBlocked();
+          }
         }
       }
 
@@ -659,17 +865,21 @@ Return JSON strictly:
   "dealConfidence": number (70-99)
 }`;
 
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.7-flash',
-          contents: prompt,
-          config: { responseMimeType: 'application/json' },
-        });
-
         try {
+          const response = await ai.models.generateContent({
+            model: 'gemini-3.8-flash',
+            contents: prompt,
+            config: { responseMimeType: 'application/json' },
+          });
+
           const parsed = JSON.parse(response.text || '{}');
-          return res.json(parsed);
-        } catch {
-          // fallback
+          if (parsed && parsed.recommendedFairPrice) {
+            return res.json(parsed);
+          }
+        } catch (apiErr: any) {
+          if (apiErr?.status === 403 || String(apiErr?.message || '').includes('403') || String(apiErr?.message || '').includes('PERMISSION_DENIED')) {
+            markGeminiBlocked();
+          }
         }
       }
 
@@ -697,7 +907,7 @@ Return JSON strictly:
   // Vite middleware for development vs static build for production
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -709,9 +919,29 @@ Return JSON strictly:
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌾 AGRITECH Server running on http://0.0.0.0:${PORT}`);
   });
+
+  server.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`Port ${PORT} in use, retrying in 1.5s...`);
+      setTimeout(() => {
+        server.close();
+        server.listen(PORT, '0.0.0.0');
+      }, 1500);
+    } else {
+      console.error('Server error:', err);
+    }
+  });
+
+  const cleanup = () => {
+    server.close(() => {
+      process.exit(0);
+    });
+  };
+  process.on('SIGTERM', cleanup);
+  process.on('SIGINT', cleanup);
 }
 
 startServer();

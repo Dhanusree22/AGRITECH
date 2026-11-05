@@ -42,31 +42,31 @@ export const AINegotiationTool: React.FC = () => {
   const handleArbitrate = async () => {
     setIsArbitrating(true);
     try {
-      const res = await fetch('/api/gemini/negotiation', {
+      const res = await fetch('/api/gemini/negotiate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          cropName,
-          farmerAskPrice,
-          buyerOfferPrice,
-          mandiBenchmark: mandiModalPrice,
-          quantityKg,
+          crop: cropName,
+          farmerPrice: farmerAskPrice,
+          buyerOffer: buyerOfferPrice,
+          mandiAverage: mandiModalPrice,
+          quantity: quantityKg,
         }),
       });
 
       if (res.ok) {
         const data = await res.json();
-        const fairPrice = data.suggestedFairPrice || ((farmerAskPrice + buyerOfferPrice) / 2);
+        const fairPrice = data.recommendedFairPrice || ((farmerAskPrice + buyerOfferPrice) / 2);
         const total = fairPrice * quantityKg;
         setDealResult({
           suggestedPrice: Number(fairPrice.toFixed(2)),
-          fairnessScore: data.fairnessScore || 96,
-          farmerProfitGain: Math.round((fairPrice - buyerOfferPrice) * quantityKg),
+          fairnessScore: data.dealConfidence || 96,
+          farmerProfitGain: Math.max(0, Math.round((fairPrice - buyerOfferPrice) * quantityKg)),
           buyerSavingsPercent: Number((((farmerAskPrice - fairPrice) / farmerAskPrice) * 100).toFixed(1)),
-          arbitrationRationale: data.arbitrationRationale || 'Equitable clearing rate matching current wholesale arrival pressure.',
-          suggestedTerms: data.suggestedTerms || [
-            'Direct farm gate pickup by buyer fleet',
-            'Immediate UPI / Bank Escrow settlement',
+          arbitrationRationale: data.rationale || 'Equitable clearing rate preserving farmer margin with buyer bulk discount.',
+          suggestedTerms: data.winWinTerms || [
+            'Buyer covers 50% of transport crate logistics',
+            'Direct farm gate dispatch with 100% Escrow security',
           ],
           winWinMetrics: {
             farmerTotal: total,
@@ -74,12 +74,33 @@ export const AINegotiationTool: React.FC = () => {
             platformEscrowFee: Math.round(total * 0.01),
           },
         });
+        return;
       }
     } catch (e) {
       console.warn('Negotiation arbitration fallback:', e);
-    } finally {
-      setIsArbitrating(false);
     }
+
+    // Static fallback for Vercel
+    const fairPrice = Math.round(((farmerAskPrice * 0.55) + (buyerOfferPrice * 0.45)) * 10) / 10;
+    const total = fairPrice * quantityKg;
+    setDealResult({
+      suggestedPrice: fairPrice,
+      fairnessScore: 94,
+      farmerProfitGain: Math.max(0, Math.round((fairPrice - buyerOfferPrice) * quantityKg)),
+      buyerSavingsPercent: Number((((farmerAskPrice - fairPrice) / farmerAskPrice) * 100).toFixed(1)),
+      arbitrationRationale: `Equitable compromise at ₹${fairPrice}/kg against mandi benchmark ₹${mandiModalPrice}/kg. Preserves farmer profit while providing buyer ₹${(farmerAskPrice - fairPrice).toFixed(1)}/kg bulk savings.`,
+      suggestedTerms: [
+        'Buyer covers 50% of transit logistics',
+        'Direct farm-gate dispatch within 48 hours',
+        '100% Escrow security released upon quality receipt',
+      ],
+      winWinMetrics: {
+        farmerTotal: total,
+        buyerTotal: total,
+        platformEscrowFee: Math.round(total * 0.01),
+      },
+    });
+    setIsArbitrating(false);
   };
 
   return (

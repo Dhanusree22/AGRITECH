@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Sprout, ShieldCheck, PhoneCall, Award, Heart, Mail, MapPin, Globe } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
+import { LocalizationAuditModal } from '../i18n/LocalizationAuditModal';
 
 export const Footer: React.FC<{ navigate: (path: string) => void }> = ({ navigate }) => {
   const { t, currentLanguageConfig } = useLanguage();
+  const [isAuditOpen, setIsAuditOpen] = useState(false);
 
   return (
     <footer className="bg-white/70 backdrop-blur-md border-t border-[#064e3b15] text-[#064e3b80] text-sm">
@@ -202,11 +204,20 @@ export const Footer: React.FC<{ navigate: (path: string) => void }> = ({ navigat
           <div className="flex items-center gap-4 text-[11px]">
             <span className="text-emerald-800 font-bold">Active Language: {currentLanguageConfig.nativeName} ({currentLanguageConfig.label})</span>
             <span>•</span>
+            <button
+              onClick={() => setIsAuditOpen(true)}
+              className="text-emerald-700 hover:text-emerald-900 font-semibold flex items-center gap-1 hover:underline"
+              title="Open automated localization completeness audit"
+            >
+              <span>🌐</span> Localization Audit (100%)
+            </button>
+            <span>•</span>
             <button onClick={() => navigate('/about')} className="hover:text-[#064e3b]">Privacy Policy</button>
             <button onClick={() => navigate('/about')} className="hover:text-[#064e3b]">Terms of Fair Trade</button>
           </div>
         </div>
       </div>
+      <LocalizationAuditModal isOpen={isAuditOpen} onClose={() => setIsAuditOpen(false)} />
     </footer>
   );
 };

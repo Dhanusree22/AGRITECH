@@ -1,15 +1,30 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { LanguageCode } from '../types';
-import { LANGUAGES, translations } from '../i18n/translations';
+import { translations } from '../i18n/translations';
 import { PHRASE_DICTIONARY } from '../i18n/dictionary';
 import { COMPREHENSIVE_PHRASES, WORD_DICTIONARY } from '../i18n/comprehensiveDictionary';
+import { MASTER_UI_PHRASES, MASTER_WORD_MAP } from '../i18n/masterTranslationDictionary';
+import {
+  SUPPORTED_LANGUAGES,
+  LanguageInfo,
+  formatCurrency as helperFormatCurrency,
+  formatNumber as helperFormatNumber,
+  formatDate as helperFormatDate,
+  formatUnit as helperFormatUnit,
+  AGRICULTURAL_GLOSSARY,
+} from '../i18n/languageConfig';
+import i18n, { resources } from '../i18n';
 
 interface LanguageContextType {
   language: LanguageCode;
   setLanguage: (lang: LanguageCode) => void;
-  t: (key: string, fallback?: string) => string;
-  languages: typeof LANGUAGES;
-  currentLanguageConfig: typeof LANGUAGES[0];
+  t: (keyOrPhrase: string, fallbackOrParams?: string | Record<string, any>) => string;
+  languages: LanguageInfo[];
+  currentLanguageConfig: LanguageInfo;
+  formatCurrency: (amount: number) => string;
+  formatNumber: (value: number) => string;
+  formatDate: (date: Date | string) => string;
+  formatUnit: (value: number, unit: string) => string;
 }
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
@@ -18,16 +33,20 @@ const LanguageContext = createContext<LanguageContextType | undefined>(undefined
 const nodeOriginalTextMap = new WeakMap<Node, string>();
 const elementOriginalPlaceholders = new WeakMap<Element, string>();
 const elementOriginalTitles = new WeakMap<Element, string>();
+const elementOriginalAriaLabels = new WeakMap<Element, string>();
 
 export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [language, setLanguageState] = useState<LanguageCode>(() => {
-    const saved = localStorage.getItem('agritech_lang') as LanguageCode;
-    return saved && translations[saved] ? saved : 'en';
+    const saved = (typeof window !== 'undefined' ? localStorage.getItem('agritech_lang') : null) as LanguageCode;
+    return saved && ['en', 'kn', 'hi', 'te', 'ta', 'ml', 'mr', 'bn'].includes(saved) ? saved : 'en';
   });
 
   const setLanguage = (lang: LanguageCode) => {
     setLanguageState(lang);
-    localStorage.setItem('agritech_lang', lang);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('agritech_lang', lang);
+    }
+    i18n.changeLanguage(lang);
   };
 
   // Compile combined dictionary lookup map for current language
@@ -49,45 +68,55 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       Object.assign(combined, COMPREHENSIVE_PHRASES[language]);
     }
 
-    // 4. Reverse map English keys from translations.en -> language translations
-    if (translations.en && translations[language]) {
-      Object.entries(translations.en).forEach(([k, enVal]) => {
-        if (translations[language][k]) {
-          combined[enVal] = translations[language][k];
-          combined[enVal.toLowerCase()] = translations[language][k];
-        }
+    // 4. Master UI phrases from masterTranslationDictionary.ts (covering all 614 UI strings)
+    if (MASTER_UI_PHRASES[language]) {
+      Object.assign(combined, MASTER_UI_PHRASES[language]);
+    }
+
+    // 5. Agricultural Glossary
+    Object.entries(AGRICULTURAL_GLOSSARY).forEach(([termKey, termLangs]) => {
+      const enTerm = termLangs.en || termKey;
+      const targetTerm = termLangs[language];
+      if (targetTerm) {
+        combined[termKey] = targetTerm;
+        combined[enTerm] = targetTerm;
+        combined[enTerm.toLowerCase()] = targetTerm;
+      }
+    });
+
+    // 6. High-resolution locale resources from /src/i18n/locales
+    const baseEnLocale = resources.en;
+    const currentLocale = resources[language];
+
+    if (baseEnLocale && currentLocale) {
+      const namespaces = Object.keys(baseEnLocale) as Array<keyof typeof baseEnLocale>;
+      namespaces.forEach((ns) => {
+        const enNsObj = baseEnLocale[ns] as Record<string, string>;
+        const curNsObj = (currentLocale[ns] as Record<string, string>) || {};
+
+        Object.entries(enNsObj).forEach(([k, enVal]) => {
+          const targetVal = curNsObj[k];
+          if (targetVal) {
+            combined[`${String(ns)}.${k}`] = targetVal;
+            combined[k] = targetVal;
+            combined[enVal] = targetVal;
+            combined[enVal.toLowerCase()] = targetVal;
+          }
+        });
       });
     }
 
-    // 5. Reverse map English phrases from PHRASE_DICTIONARY.en -> language
-    if (PHRASE_DICTIONARY.en && PHRASE_DICTIONARY[language]) {
-      Object.entries(PHRASE_DICTIONARY.en).forEach(([enKey, enVal]) => {
-        if (PHRASE_DICTIONARY[language][enKey]) {
-          combined[enVal] = PHRASE_DICTIONARY[language][enKey];
-          combined[enVal.toLowerCase()] = PHRASE_DICTIONARY[language][enKey];
-        }
-      });
-    }
-
-    // 6. Reverse map from COMPREHENSIVE_PHRASES.en -> language
-    if (COMPREHENSIVE_PHRASES.en && COMPREHENSIVE_PHRASES[language]) {
-      Object.entries(COMPREHENSIVE_PHRASES.en).forEach(([enKey, enVal]) => {
-        if (COMPREHENSIVE_PHRASES[language][enKey]) {
-          combined[enVal] = COMPREHENSIVE_PHRASES[language][enKey];
-          combined[enVal.toLowerCase()] = COMPREHENSIVE_PHRASES[language][enKey];
-        }
-      });
-    }
-
-    // 7. Also make sure all direct English keys in COMPREHENSIVE_PHRASES[language] have lowercase entries
-    if (COMPREHENSIVE_PHRASES[language]) {
-      Object.entries(COMPREHENSIVE_PHRASES[language]).forEach(([enPhrase, localizedPhrase]) => {
-        if (localizedPhrase) {
-          combined[enPhrase] = String(localizedPhrase);
-          combined[enPhrase.toLowerCase()] = String(localizedPhrase);
-        }
-      });
-    }
+    // 7. Normalize all phrases: add lowercase, title case, and UPPERCASE variants
+    const allKeys = Object.keys(combined);
+    allKeys.forEach((k) => {
+      const val = combined[k];
+      if (val) {
+        const trimmed = k.trim();
+        combined[trimmed] = val;
+        combined[trimmed.toLowerCase()] = val;
+        combined[trimmed.toUpperCase()] = val;
+      }
+    });
 
     return combined;
   }, [language]);
@@ -95,13 +124,20 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Pre-sorted list of phrase keys (longest first) to prevent premature substrings from replacing first
   const sortedPhrases = useMemo(() => {
     return Object.keys(activeDictionary)
-      .filter((k) => k && k.length > 1 && !/^[0-9\s.,/\\()\-:;%₹+]+$/.test(k))
+      .filter((k) => k && k.length > 2 && !/^[0-9\s.,/\\()\-:;%₹+]+$/.test(k))
       .sort((a, b) => b.length - a.length);
   }, [activeDictionary]);
 
-  // Active single-word fallback dictionary
+  // Active single-word fallback dictionary (all 1,800+ words including agricultural terms)
   const activeWordDictionary = useMemo(() => {
-    return WORD_DICTIONARY[language] || {};
+    const wordMap: Record<string, string> = {};
+    if (WORD_DICTIONARY[language]) {
+      Object.assign(wordMap, WORD_DICTIONARY[language]);
+    }
+    if (MASTER_WORD_MAP[language]) {
+      Object.assign(wordMap, MASTER_WORD_MAP[language]);
+    }
+    return wordMap;
   }, [language]);
 
   // Primary translation engine function
@@ -110,60 +146,67 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!str || str.trim().length === 0) return str;
       if (language === 'en') return str;
 
-      const trimmed = str.trim();
+      // Replace HTML entities
+      const rawTrimmed = str.trim();
+      const cleaned = rawTrimmed
+        .replace(/&bull;/g, '•')
+        .replace(/&middot;/g, '·')
+        .replace(/&amp;/g, '&')
+        .replace(/&gt;/g, '>')
+        .replace(/&lt;/g, '<');
 
       // 1. Exact match in combined dictionary
-      if (activeDictionary[trimmed]) {
-        return str.replace(trimmed, String(activeDictionary[trimmed]));
+      if (activeDictionary[cleaned]) {
+        return str.replace(rawTrimmed, String(activeDictionary[cleaned]));
       }
-      const lower = trimmed.toLowerCase();
+      const lower = cleaned.toLowerCase();
       if (activeDictionary[lower]) {
-        return str.replace(trimmed, String(activeDictionary[lower]));
+        return str.replace(rawTrimmed, String(activeDictionary[lower]));
+      }
+      const upper = cleaned.toUpperCase();
+      if (activeDictionary[upper]) {
+        return str.replace(rawTrimmed, String(activeDictionary[upper]));
       }
 
-      // 2. Sequential multi-phrase replacement (from longest phrase to shortest)
-      let result = str;
-      let hasReplaced = false;
-
-      for (const phraseKey of sortedPhrases) {
-        if (phraseKey.length > 1 && result.includes(phraseKey)) {
-          const localized = activeDictionary[phraseKey];
-          if (localized && localized !== phraseKey) {
-            result = result.split(phraseKey).join(localized);
-            hasReplaced = true;
-          }
+      // 2. Check stripped punctuation match (e.g., "Mandi:", "Rain: 0mm", "Humidity: 58%")
+      const punctMatch = cleaned.match(/^([A-Za-z0-9\s]+)([:.!?,\-()%]+)$/);
+      if (punctMatch) {
+        const core = punctMatch[1].trim();
+        const punct = punctMatch[2];
+        if (activeDictionary[core]) {
+          return str.replace(rawTrimmed, `${activeDictionary[core]}${punct}`);
+        }
+        if (activeDictionary[core.toLowerCase()]) {
+          return str.replace(rawTrimmed, `${activeDictionary[core.toLowerCase()]}${punct}`);
         }
       }
 
-      // 3. Smart metric & unit replacements (like /kg, per kg, Tons, etc.)
-      const unitMap: [RegExp, string][] =
-        language === 'kn'
-          ? [
-              [/\/kg\b/gi, '/ಕೆ.ಜಿ.'],
-              [/\bper kg\b/gi, 'ಪ್ರತಿ ಕೆ.ಜಿ.'],
-              [/\bTons\b/gi, 'ಟನ್‌ಗಳು'],
-              [/\bTon\b/gi, 'ಟನ್'],
-              [/\bQuintal\b/gi, 'ಕ್ವಿಂಟಾಲ್'],
-              [/\bQuintals\b/gi, 'ಕ್ವಿಂಟಾಲ್‌ಗಳು'],
-            ]
-          : language === 'hi'
-          ? [
-              [/\/kg\b/gi, '/कि.ग्रा.'],
-              [/\bper kg\b/gi, 'प्रति कि.ग्रा.'],
-              [/\bTons\b/gi, 'टन'],
-              [/\bQuintal\b/gi, 'क्विंटल'],
-            ]
-          : [];
+      // 3. Sequential multi-phrase replacement (from longest phrase to shortest)
+      let result = cleaned;
+      let hasReplaced = false;
 
-      for (const [pattern, replacement] of unitMap) {
-        if (pattern.test(result)) {
-          result = result.replace(pattern, replacement);
-          hasReplaced = true;
+      for (const phraseKey of sortedPhrases) {
+        if (phraseKey.length > 2 && result.toLowerCase().includes(phraseKey.toLowerCase())) {
+          const localized = activeDictionary[phraseKey];
+          if (localized && localized !== phraseKey) {
+            // Check word boundaries for clean alphabetical words to avoid mangling larger words
+            if (/^[A-Za-z0-9 ]+$/.test(phraseKey)) {
+              const regex = new RegExp(`\\b${phraseKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+              if (regex.test(result)) {
+                result = result.replace(regex, localized);
+                hasReplaced = true;
+              }
+            } else if (result.includes(phraseKey)) {
+              result = result.split(phraseKey).join(localized);
+              hasReplaced = true;
+            }
+          }
         }
       }
 
       // 4. Word-level token translation for any remaining English words
       result = result.replace(/\b[A-Za-z][A-Za-z0-9'-]*\b/g, (match) => {
+        // Direct match
         if (activeWordDictionary[match]) {
           hasReplaced = true;
           return activeWordDictionary[match];
@@ -178,25 +221,109 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           hasReplaced = true;
           return activeWordDictionary[cap];
         }
+
+        // Check if plural ending with 's' or 'es'
+        if (matchLower.endsWith('s') && matchLower.length > 3) {
+          const singular = matchLower.slice(0, -1);
+          if (activeWordDictionary[singular]) {
+            hasReplaced = true;
+            return activeWordDictionary[singular];
+          }
+        }
+        if (matchLower.endsWith('es') && matchLower.length > 4) {
+          const singular = matchLower.slice(0, -2);
+          if (activeWordDictionary[singular]) {
+            hasReplaced = true;
+            return activeWordDictionary[singular];
+          }
+        }
+
+        // Check if verb ending with 'ing' or 'ed'
+        if (matchLower.endsWith('ing') && matchLower.length > 5) {
+          const base = matchLower.slice(0, -3);
+          if (activeWordDictionary[base]) {
+            hasReplaced = true;
+            return activeWordDictionary[base];
+          }
+        }
+        if (matchLower.endsWith('ed') && matchLower.length > 4) {
+          const base = matchLower.slice(0, -2);
+          if (activeWordDictionary[base]) {
+            hasReplaced = true;
+            return activeWordDictionary[base];
+          }
+        }
+
         return match;
       });
 
-      return hasReplaced ? result : str;
+      return hasReplaced ? str.replace(rawTrimmed, result) : str;
     },
     [activeDictionary, activeWordDictionary, language, sortedPhrases]
   );
 
   // Hook-level t() function
   const t = useCallback(
-    (keyOrPhrase: string, fallback?: string): string => {
-      if (!keyOrPhrase) return fallback || '';
-      if (language === 'en') return fallback || keyOrPhrase;
-      return translateString(keyOrPhrase) || fallback || keyOrPhrase;
+    (keyOrPhrase: string, fallbackOrParams?: string | Record<string, any>): string => {
+      if (!keyOrPhrase) return typeof fallbackOrParams === 'string' ? fallbackOrParams : '';
+
+      let params: Record<string, any> | undefined = undefined;
+      let fallback: string | undefined = undefined;
+      if (typeof fallbackOrParams === 'object' && fallbackOrParams !== null) {
+        params = fallbackOrParams;
+      } else if (typeof fallbackOrParams === 'string') {
+        fallback = fallbackOrParams;
+      }
+
+      let res = '';
+      if (language === 'en') {
+        res = fallback || keyOrPhrase;
+      } else {
+        // Check i18next first if dot notation (e.g., 'common.login')
+        if (keyOrPhrase.includes('.')) {
+          const i18nVal = i18n.t(keyOrPhrase);
+          if (i18nVal && i18nVal !== keyOrPhrase) {
+            res = i18nVal;
+          }
+        }
+        if (!res) {
+          res = translateString(keyOrPhrase) || fallback || keyOrPhrase;
+        }
+      }
+
+      // Safe parameter interpolation: replaces {key} with value
+      if (params) {
+        Object.entries(params).forEach(([k, v]) => {
+          res = res.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v));
+        });
+      }
+
+      return res;
     },
     [language, translateString]
   );
 
-  const currentLanguageConfig = LANGUAGES.find((l) => l.code === language) || LANGUAGES[0];
+  const currentLanguageConfig = useMemo(() => {
+    return SUPPORTED_LANGUAGES.find((l) => l.code === language) || SUPPORTED_LANGUAGES[0];
+  }, [language]);
+
+  // Intl formatting helpers bound to active language
+  const formatCurrency = useCallback(
+    (amount: number) => helperFormatCurrency(amount, language),
+    [language]
+  );
+  const formatNumber = useCallback(
+    (value: number) => helperFormatNumber(value, language),
+    [language]
+  );
+  const formatDate = useCallback(
+    (date: Date | string) => helperFormatDate(date, language),
+    [language]
+  );
+  const formatUnit = useCallback(
+    (value: number, unit: string) => helperFormatUnit(value, unit, language),
+    [language]
+  );
 
   // Dynamic DOM-level translation observer for 100% complete coverage of every single text node
   useEffect(() => {
@@ -204,7 +331,6 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     if (typeof window === 'undefined') return;
 
-    // Recursive node processor
     const processNode = (node: Node) => {
       const parent = node.parentElement;
       if (
@@ -295,6 +421,25 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           }
         }
 
+        // Aria Labels
+        if (el.hasAttribute('aria-label')) {
+          let origAria = elementOriginalAriaLabels.get(el);
+          if (origAria === undefined) {
+            origAria = el.getAttribute('aria-label') || '';
+            elementOriginalAriaLabels.set(el, origAria);
+          }
+          if (language === 'en') {
+            if (el.getAttribute('aria-label') !== origAria) {
+              el.setAttribute('aria-label', origAria);
+            }
+          } else {
+            const trans = translateString(origAria);
+            if (el.getAttribute('aria-label') !== trans) {
+              el.setAttribute('aria-label', trans);
+            }
+          }
+        }
+
         // Button/Submit inputs
         if (
           el.tagName === 'INPUT' &&
@@ -310,6 +455,24 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               if (trans !== val) {
                 inputEl.value = trans;
               }
+            }
+          }
+        }
+
+        // Option elements inside <select>
+        if (el.tagName === 'OPTION') {
+          const opt = el as HTMLOptionElement;
+          let origOptText = nodeOriginalTextMap.get(opt);
+          if (origOptText === undefined) {
+            origOptText = opt.text || opt.innerText || '';
+            nodeOriginalTextMap.set(opt, origOptText);
+          }
+          if (language === 'en') {
+            if (opt.text !== origOptText) opt.text = origOptText;
+          } else {
+            const trans = translateString(origOptText);
+            if (opt.text !== trans) {
+              opt.text = trans;
             }
           }
         }
@@ -339,6 +502,8 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           mutation.addedNodes.forEach((added) => walkTree(added));
         } else if (mutation.type === 'characterData' && mutation.target) {
           processNode(mutation.target);
+        } else if (mutation.type === 'attributes' && mutation.target) {
+          processNode(mutation.target);
         }
       }
     });
@@ -347,6 +512,8 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       childList: true,
       subtree: true,
       characterData: true,
+      attributes: true,
+      attributeFilter: ['placeholder', 'title', 'aria-label', 'value'],
     });
 
     return () => {
@@ -360,8 +527,12 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         language,
         setLanguage,
         t,
-        languages: LANGUAGES,
+        languages: SUPPORTED_LANGUAGES,
         currentLanguageConfig,
+        formatCurrency,
+        formatNumber,
+        formatDate,
+        formatUnit,
       }}
     >
       {children}

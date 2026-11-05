@@ -19,6 +19,7 @@ import {
 import { useLanguage } from '../../context/LanguageContext';
 import { useAuth } from '../../context/AuthContext';
 import { LanguageCode } from '../../types';
+import { aiAgentController } from '../../services/aiAgent/aiAgentController';
 
 export const AIChatbotWidget: React.FC = () => {
   const { language, currentLanguageConfig, t, languages, setLanguage } = useLanguage();
@@ -41,6 +42,7 @@ export const AIChatbotWidget: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recognitionRef = useRef<any>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const sessionIdRef = useRef<string>('chat-session-' + Date.now());
 
   const getGreetingForLang = useCallback((lang: LanguageCode) => {
     switch (lang) {
@@ -230,28 +232,38 @@ export const AIChatbotWidget: React.FC = () => {
     setMicError('');
 
     try {
-      const res = await fetch('/api/gemini/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: query,
-          role,
-          language,
-          context: `User role: ${role}. Location: ${user?.location || 'Karnataka, India'}. Target Language: ${currentLanguageConfig.label} (${language}). Today Tomato in Kolar is ₹32/kg.`,
-        }),
-      });
-
       let aiReply = '';
-      if (res.ok) {
-        const data = await res.json();
-        aiReply = data.reply;
-      } else {
-        aiReply =
-          language === 'kn'
-            ? 'ಕೋಲಾರ ಮಂಡಿಯಲ್ಲಿ ಇಂದಿನ ಟೊಮೆಟೊ ಬೆಲೆ ₹32/ಕೆಜಿ (+8.4% ಏರಿಕೆ). ಮುಂದಿನ 7 ದಿನಗಳಲ್ಲಿ ಬೆಲೆ ₹35 ರಿಂದ ₹38 ರವರೆಗೆ ಏರುವ ಸಾಧ್ಯತೆಯಿದೆ.'
-            : language === 'hi'
-            ? 'कोलार मंडी में आज टमाटर का भाव ₹32/किलो है। अगले 7 दिनों में भाव ₹35 से ₹38 तक बढ़ने का अनुमान है।'
-            : 'Today modal price for Tomato in Kolar APMC is ₹32/kg. High buyer demand recorded across Southern distribution centers.';
+      try {
+        const res = await fetch('/api/gemini/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: query,
+            role,
+            language,
+            sessionId: sessionIdRef.current,
+            context: `User role: ${role}. Location: ${user?.location || 'Karnataka, India'}. Target Language: ${currentLanguageConfig.label} (${language}).`,
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          aiReply = data.reply;
+        }
+      } catch (networkErr) {
+        console.warn('Network call to /api/gemini/chat failed, activating local AI agent engine:', networkErr);
+      }
+
+      // If backend was unreachable or returned empty, execute client-side AI agent engine directly
+      if (!aiReply) {
+        const agentRes = await aiAgentController.processQuery({
+          query,
+          language,
+          role: role as any,
+          sessionId: sessionIdRef.current,
+          context: `Role: ${role}`,
+        });
+        aiReply = agentRes.reply;
       }
 
       const aiMsgId = `ai-${Date.now()}`;
@@ -265,33 +277,32 @@ export const AIChatbotWidget: React.FC = () => {
         },
       ]);
 
-      // Automatically speak the answer in Kannada if autoVoice is on
+      // Automatically speak the answer in selected language if autoVoice is on
       if (autoVoice) {
         setTimeout(() => {
           speakText(aiReply, aiMsgId);
         }, 150);
       }
-    } catch {
-      const fallbackReply =
-        language === 'kn'
-          ? 'ಕೋಲಾರ ಮಂಡಿಯಲ್ಲಿ ಇಂದಿನ ಟೊಮೆಟೊ ದರ ₹32/ಕೆಜಿ, ಈರುಳ್ಳಿ ₹28/ಕೆಜಿ. ಗುಣಮಟ್ಟದ ಗ್ರೇಡ್-ಎ ಸರಕಿಗೆ ಉತ್ತಮ ಬೇಡಿಕೆ ಇದೆ.'
-          : language === 'hi'
-          ? 'कोलार मंडी में आज टमाटर ₹32/किलो और प्याज ₹28/किलो है।'
-          : 'Live Kolar APMC mandi rate: Tomato ₹32/kg, Onion ₹28/kg. Trading system operating normally.';
-
+    } catch (finalErr) {
+      console.error('Final chat processing error:', finalErr);
+      const fallbackRes = await aiAgentController.processQuery({
+        query,
+        language,
+        role: role as any,
+        sessionId: sessionIdRef.current,
+      });
       const fallbackId = `ai-${Date.now()}`;
       setMessages((prev) => [
         ...prev,
         {
           id: fallbackId,
           sender: 'ai',
-          text: fallbackReply,
+          text: fallbackRes.reply,
           time: 'Now',
         },
       ]);
-
       if (autoVoice) {
-        speakText(fallbackReply, fallbackId);
+        speakText(fallbackRes.reply, fallbackId);
       }
     } finally {
       setLoading(false);

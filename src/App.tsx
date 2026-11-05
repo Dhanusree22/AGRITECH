@@ -14,6 +14,7 @@ import { AIChatbotWidget } from './components/ai/AIChatbotWidget';
 import { GlobalVoiceButton } from './components/voice/GlobalVoiceButton';
 import { VoiceAssistantModal } from './components/voice/VoiceAssistantModal';
 import { Agri3DBackground } from './components/3d/Agri3DBackground';
+import { RoleAccessDenied } from './components/auth/RoleAccessDenied';
 
 const AppContent: React.FC = () => {
   const { user } = useAuth();
@@ -39,7 +40,9 @@ const AppContent: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Route resolver
+  const { role } = useAuth();
+
+  // Route resolver with Role-Based Route Protection
   const renderView = () => {
     if (currentPath === '/' || currentPath === '') {
       return <LandingPage navigate={navigate} />;
@@ -54,12 +57,21 @@ const AppContent: React.FC = () => {
       return <MarketplacePage navigate={navigate} />;
     }
     if (currentPath.startsWith('/farmer')) {
+      if (role !== 'farmer') {
+        return <RoleAccessDenied currentRole={role} targetRole="farmer" navigate={navigate} />;
+      }
       return <FarmerDashboard navigate={navigate} />;
     }
     if (currentPath.startsWith('/buyer')) {
+      if (role !== 'buyer') {
+        return <RoleAccessDenied currentRole={role} targetRole="buyer" navigate={navigate} />;
+      }
       return <BuyerDashboard navigate={navigate} />;
     }
     if (currentPath.startsWith('/admin')) {
+      if (role !== 'admin') {
+        return <RoleAccessDenied currentRole={role} targetRole="admin" navigate={navigate} />;
+      }
       return <AdminDashboard navigate={navigate} />;
     }
 

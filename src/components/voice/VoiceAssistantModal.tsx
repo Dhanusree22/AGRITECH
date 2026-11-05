@@ -20,6 +20,7 @@ import {
 import { useLanguage } from '../../context/LanguageContext';
 import { useAuth } from '../../context/AuthContext';
 import { LanguageCode } from '../../types';
+import { aiAgentController } from '../../services/aiAgent/aiAgentController';
 
 interface VoiceAssistantModalProps {
   isOpen: boolean;
@@ -48,6 +49,7 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
   const synthRef = useRef<SpeechSynthesis | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+  const sessionIdRef = useRef<string>('voice-session-' + Date.now());
 
   const getInitialGreeting = useCallback((lang: LanguageCode) => {
     switch (lang) {
@@ -414,30 +416,40 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
     setIsProcessing(true);
 
     try {
-      const res = await fetch('/api/gemini/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: queryText,
-          role,
-          language,
-          context: `User selected language: ${currentLanguageConfig.label} (${language}). Location: ${
-            user?.location || 'Karnataka, India'
-          }. Mandi Tomato is ₹32/kg, Onion is ₹28/kg. Escrow active.`,
-        }),
-      });
-
       let aiReply = '';
-      if (res.ok) {
-        const data = await res.json();
-        aiReply = data.reply;
-      } else {
-        aiReply =
-          language === 'kn'
-            ? 'ಕೋಲಾರ ಮಂಡಿಯಲ್ಲಿ ಇಂದಿನ ಟೊಮೆಟೊ ಬೆಲೆ ₹32/ಕೆಜಿ (+8.4% ಏರಿಕೆ). ಬೇಡಿಕೆ ಹೆಚ್ಚಾಗಿದ್ದು, ಮುಂದಿನ 7 ದಿನಗಳಲ್ಲಿ ಬೆಲೆ ₹35 ರಿಂದ ₹38 ರವರೆಗೆ ಏರುವ ಸಾಧ್ಯತೆಯಿದೆ.'
-            : language === 'hi'
-            ? 'कोलार मंडी में आज टमाटर का भाव ₹32/किलो है (+8.4% वृद्धि)। अगले 7 दिनों में भाव ₹35-₹38 तक जाने का अनुमान है।'
-            : 'Live APMC rate for Tomato is ₹32/kg (up 8.4%). AI predicts an upward price trend of 10-14% over the next 7 days.';
+      try {
+        const res = await fetch('/api/gemini/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: queryText,
+            role,
+            language,
+            sessionId: sessionIdRef.current,
+            context: `User selected language: ${currentLanguageConfig.label} (${language}). Location: ${
+              user?.location || 'Karnataka, India'
+            }.`,
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          aiReply = data.reply;
+        }
+      } catch (networkErr) {
+        console.warn('Network call failed, using client-side AI agent engine:', networkErr);
+      }
+
+      // If network is offline or Vercel static deployment, execute client-side AI agent engine directly
+      if (!aiReply) {
+        const agentRes = await aiAgentController.processQuery({
+          query: queryText,
+          language,
+          role: role as any,
+          sessionId: sessionIdRef.current,
+          context: `Role: ${role}`,
+        });
+        aiReply = agentRes.reply;
       }
 
       const aiMsgId = `ai-${Date.now()}`;
@@ -456,11 +468,14 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
           speakText(aiReply, undefined, aiMsgId);
         }, 150);
       }
-    } catch {
-      const fallbackMsg =
-        language === 'kn'
-          ? 'ಕೋಲಾರ ಮಂಡಿ ದರ: ಟೊಮೆಟೊ ₹32/ಕೆಜಿ, ಈರುಳ್ಳಿ ₹28/ಕೆಜಿ. ಹವಾಮಾನ: ಸಾಧಾರಣ ಬಿಸಿಲು ಮತ್ತು ಉತ್ತಮ ಕಟಾವು ಸಮಯ.'
-          : 'Live mandi rate: Tomato ₹32/kg, Onion ₹28/kg. Weather: optimal harvest window.';
+    } catch (finalErr) {
+      console.error('Final voice processing error:', finalErr);
+      const fallbackRes = await aiAgentController.processQuery({
+        query: queryText,
+        language,
+        role: role as any,
+        sessionId: sessionIdRef.current,
+      });
 
       const fallbackId = `ai-${Date.now()}`;
       setMessages((prev) => [
@@ -468,12 +483,12 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
         {
           id: fallbackId,
           sender: 'ai',
-          text: fallbackMsg,
+          text: fallbackRes.reply,
           time: 'Now',
         },
       ]);
       if (autoSpeak) {
-        speakText(fallbackMsg, undefined, fallbackId);
+        speakText(fallbackRes.reply, undefined, fallbackId);
       }
     } finally {
       setIsProcessing(false);

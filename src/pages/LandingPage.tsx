@@ -32,6 +32,8 @@ import {
   Info,
   Check,
   ExternalLink,
+  Mail,
+  MapPin,
 } from 'lucide-react';
 import { AIPricePredictionTool } from '../components/ai/AIPricePredictionTool';
 import { AICropQualityGradingTool } from '../components/ai/AICropQualityGradingTool';
@@ -43,7 +45,7 @@ import { VoiceAssistantModal } from '../components/voice/VoiceAssistantModal';
 
 export const LandingPage: React.FC<{ navigate: (path: string) => void }> = ({ navigate }) => {
   const { t, language, languages, currentLanguageConfig, setLanguage } = useLanguage();
-  const { switchRole } = useAuth();
+  const { user, switchRole } = useAuth();
   const { mandiPrices, crops } = useStore();
 
   const [activeAITab, setActiveAITab] = useState<'prediction' | 'grading' | 'negotiation'>('prediction');
@@ -54,10 +56,15 @@ export const LandingPage: React.FC<{ navigate: (path: string) => void }> = ({ na
   const currentMandiItem = mandiPrices.find((m) => m.crop === selectedMandiCrop) || mandiPrices[0];
 
   const handleRoleRoute = (roleTarget: 'farmer' | 'buyer' | 'admin') => {
-    switchRole(roleTarget);
-    if (roleTarget === 'farmer') navigate('/farmer/dashboard');
-    else if (roleTarget === 'buyer') navigate('/buyer/dashboard');
-    else if (roleTarget === 'admin') navigate('/admin/dashboard');
+    if (user && user.role === roleTarget) {
+      if (roleTarget === 'farmer') navigate('/farmer/dashboard');
+      else if (roleTarget === 'buyer') navigate('/buyer/dashboard');
+      else if (roleTarget === 'admin') navigate('/admin/dashboard');
+    } else {
+      // Pre-select role and navigate to dedicated login page
+      switchRole(roleTarget);
+      navigate('/login');
+    }
   };
 
   return (
@@ -82,64 +89,64 @@ export const LandingPage: React.FC<{ navigate: (path: string) => void }> = ({ na
             <span>AI-Powered Smart Agricultural Trading & Farmer Support Platform</span>
           </motion.div>
 
-          {/* Exact Prompt Headline */}
+          {/* Prompt Headline */}
           <motion.h1
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
             className="text-4xl sm:text-6xl lg:text-7xl font-black tracking-tight text-[#123D2A] leading-[1.1]"
           >
-            Grow Smarter.{' '}
+            Empowering Agriculture Through{' '}
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#10B981] via-[#059669] to-[#00B8F0]">
-              Trade Better.
-            </span>{' '}
-            Farm the Future.
+              Artificial Intelligence
+            </span>
           </motion.h1>
 
-          {/* Exact Prompt Supporting Text */}
+          {/* Prompt Supporting Subheading */}
           <motion.p
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
             className="text-base sm:text-xl text-[#18251E]/80 max-w-3xl mx-auto leading-relaxed font-medium"
           >
-            One intelligent platform connecting farmers, buyers, and agricultural administrators through
-            AI-powered insights, transparent trading, and real-time agricultural intelligence.
+            Connect farmers and buyers, discover smarter agricultural insights, predict crop performance, monitor market prices, and transform the future of farming with AgriTech.
           </motion.p>
 
-          {/* CTA Buttons */}
+          {/* Three Prominent Action Buttons */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
             className="flex flex-wrap items-center justify-center gap-4 pt-4"
           >
+            {/* 1. GET STARTED */}
             <button
               onClick={() => navigate('/register')}
               className="group flex items-center gap-2.5 px-8 py-4 rounded-full bg-gradient-to-r from-[#123D2A] via-[#10B981] to-[#059669] text-white font-extrabold text-sm sm:text-base shadow-xl shadow-emerald-950/25 hover:shadow-2xl hover:scale-105 transition-all cursor-pointer"
             >
-              <span>Get Started</span>
+              <span>GET STARTED</span>
               <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </button>
 
+            {/* 2. LOGIN */}
             <button
-              onClick={() => {
-                const el = document.getElementById('preview-dashboard');
-                if (el) el.scrollIntoView({ behavior: 'smooth' });
-              }}
-              className="flex items-center gap-2 px-7 py-4 rounded-full bg-white/85 backdrop-blur-md border border-[#123D2A]/15 hover:border-[#10B981] text-[#123D2A] font-extrabold text-sm sm:text-base shadow-md hover:bg-emerald-50/50 transition-all cursor-pointer"
+              onClick={() => navigate('/login')}
+              className="flex items-center gap-2 px-8 py-4 rounded-full bg-white/90 backdrop-blur-md border border-[#123D2A]/20 hover:border-[#10B981] text-[#123D2A] font-extrabold text-sm sm:text-base shadow-md hover:bg-emerald-50/70 transition-all cursor-pointer"
             >
-              <span>Explore AgriTech</span>
+              <span>LOGIN</span>
               <ChevronRight className="w-4 h-4 text-[#10B981]" />
             </button>
 
+            {/* 3. EXPLORE PLATFORM */}
             <button
-              onClick={() => setVoiceOpen(true)}
-              className="flex items-center gap-2 px-5 py-4 rounded-full bg-[#10B981]/15 border border-[#10B981]/30 hover:bg-[#10B981]/25 text-[#123D2A] font-bold text-xs sm:text-sm shadow-xs transition-all cursor-pointer"
-              title="Speak in Kannada, Hindi, Telugu, Tamil, English & more"
+              onClick={() => {
+                const el = document.getElementById('features');
+                if (el) el.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="flex items-center gap-2 px-7 py-4 rounded-full bg-[#10B981]/15 border border-[#10B981]/30 hover:bg-[#10B981]/25 text-[#123D2A] font-extrabold text-sm sm:text-base shadow-xs transition-all cursor-pointer"
             >
-              <Mic className="w-4 h-4 text-[#10B981] animate-pulse" />
-              <span>Voice AI (8 Languages)</span>
+              <span>EXPLORE PLATFORM</span>
+              <ChevronRight className="w-4 h-4 text-[#10B981]" />
             </button>
           </motion.div>
         </div>
@@ -452,10 +459,9 @@ export const LandingPage: React.FC<{ navigate: (path: string) => void }> = ({ na
                 <span className="text-[11px] font-black uppercase tracking-wider text-[#10B981]">
                   Primary Producer Module
                 </span>
-                <h3 className="text-2xl font-black text-[#123D2A] mt-1">🌾 Farmer Portal</h3>
+                <h3 className="text-2xl font-black text-[#123D2A] mt-1">🌾 Farmer</h3>
                 <p className="text-xs text-[#18251E]/70 mt-2 leading-relaxed">
-                  Manage crops, discover market prices, obtain agricultural recommendations, forecast yield,
-                  and sell produce directly without middlemen deductions.
+                  Manage your farm, monitor crop health, receive AI-powered agricultural recommendations, predict yields, and sell your produce directly to buyers.
                 </p>
               </div>
 
@@ -485,9 +491,9 @@ export const LandingPage: React.FC<{ navigate: (path: string) => void }> = ({ na
 
             <button
               onClick={() => handleRoleRoute('farmer')}
-              className="w-full py-3.5 rounded-full bg-[#123D2A] hover:bg-[#064e3b] text-white font-extrabold text-xs shadow-lg shadow-emerald-950/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
+              className="w-full py-3.5 rounded-full bg-[#123D2A] hover:bg-[#064e3b] text-white font-extrabold text-xs shadow-lg shadow-emerald-950/20 flex items-center justify-center gap-2 transition-all cursor-pointer tracking-wider"
             >
-              <span>Enter Farmer Portal</span>
+              <span>ENTER FARMER PORTAL</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </motion.div>
@@ -507,10 +513,9 @@ export const LandingPage: React.FC<{ navigate: (path: string) => void }> = ({ na
                 <span className="text-[11px] font-black uppercase tracking-wider text-[#00B8F0]">
                   Wholesale & Retail Sourcing
                 </span>
-                <h3 className="text-2xl font-black text-cyan-950 mt-1">🛒 Buyer Portal</h3>
+                <h3 className="text-2xl font-black text-cyan-950 mt-1">🛒 Buyer</h3>
                 <p className="text-xs text-[#18251E]/70 mt-2 leading-relaxed">
-                  Discover verified farmer listings, compare prices across state mandis, request volume purchases,
-                  and manage orders with locked escrow protection.
+                  Discover agricultural products, connect directly with farmers, compare market prices, manage procurement, and track orders.
                 </p>
               </div>
 
@@ -540,9 +545,9 @@ export const LandingPage: React.FC<{ navigate: (path: string) => void }> = ({ na
 
             <button
               onClick={() => handleRoleRoute('buyer')}
-              className="w-full py-3.5 rounded-full bg-[#0e7490] hover:bg-[#0891b2] text-white font-extrabold text-xs shadow-lg shadow-cyan-950/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
+              className="w-full py-3.5 rounded-full bg-[#0e7490] hover:bg-[#0891b2] text-white font-extrabold text-xs shadow-lg shadow-cyan-950/20 flex items-center justify-center gap-2 transition-all cursor-pointer tracking-wider"
             >
-              <span>Enter Buyer Portal</span>
+              <span>ENTER BUYER PORTAL</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </motion.div>
@@ -562,10 +567,9 @@ export const LandingPage: React.FC<{ navigate: (path: string) => void }> = ({ na
                 <span className="text-[11px] font-black uppercase tracking-wider text-purple-700">
                   Governance & Compliance
                 </span>
-                <h3 className="text-2xl font-black text-purple-950 mt-1">⚙️ Admin Command</h3>
+                <h3 className="text-2xl font-black text-purple-950 mt-1">⚙️ Admin</h3>
                 <p className="text-xs text-[#18251E]/70 mt-2 leading-relaxed">
-                  Manage users, monitor marketplace activity, review analytics, verify regulatory compliance,
-                  and oversee platform integrity and AI model health.
+                  Monitor platform operations, manage users, oversee marketplace activities, review analytics, and manage agricultural intelligence.
                 </p>
               </div>
 
@@ -595,9 +599,9 @@ export const LandingPage: React.FC<{ navigate: (path: string) => void }> = ({ na
 
             <button
               onClick={() => handleRoleRoute('admin')}
-              className="w-full py-3.5 rounded-full bg-[#581c87] hover:bg-[#6b21a8] text-white font-extrabold text-xs shadow-lg shadow-purple-950/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
+              className="w-full py-3.5 rounded-full bg-[#581c87] hover:bg-[#6b21a8] text-white font-extrabold text-xs shadow-lg shadow-purple-950/20 flex items-center justify-center gap-2 transition-all cursor-pointer tracking-wider"
             >
-              <span>Access Admin Headquarters</span>
+              <span>ADMIN PORTAL</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </motion.div>
@@ -929,12 +933,12 @@ export const LandingPage: React.FC<{ navigate: (path: string) => void }> = ({ na
       </section>
 
       {/* =========================================================================
-          SECTION 5F: PLATFORM STATISTICS & BENCHMARKS
+          SECTION 5F: PLATFORM STATISTICS, ABOUT US & BENCHMARKS
           "Display verified platform statistics only when actual data exists.
            During initial setup, use clearly labeled sample preview data or placeholders.
            Do not invent real farmer counts, revenue, transactions, accuracy rates, or impact statistics."
          ========================================================================= */}
-      <section className="py-16 bg-white/50 backdrop-blur-md border-t border-[#123D2A]/10">
+      <section id="about" className="py-16 bg-white/50 backdrop-blur-md border-t border-[#123D2A]/10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
@@ -1053,6 +1057,62 @@ export const LandingPage: React.FC<{ navigate: (path: string) => void }> = ({ na
             >
               Start Talking with AgriAI
             </button>
+          </div>
+        </div>
+      </section>
+
+      {/* =========================================================================
+          SECTION: CONTACT & KISAN SUPPORT
+         ========================================================================= */}
+      <section id="contact" className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
+        <div className="text-center max-w-3xl mx-auto space-y-3">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#10B981]/15 border border-[#10B981]/30 text-[#123D2A] text-xs font-bold">
+            <PhoneCall className="w-3.5 h-3.5 text-[#10B981]" />
+            <span>24/7 National Farmer & Buyer Support</span>
+          </div>
+          <h2 className="text-3xl sm:text-4xl font-black text-[#123D2A] tracking-tight">
+            Connect with AgriTech Support & APMC Liaison
+          </h2>
+          <p className="text-sm text-[#18251E]/70 max-w-2xl mx-auto">
+            Need assistance with mandi price verification, escrow settlement, farmer onboarding, or bulk procurement contracts? Reach our agricultural experts directly.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="p-7 rounded-3xl bg-white/85 backdrop-blur-xl border border-white/80 shadow-lg text-center space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center mx-auto">
+              <PhoneCall className="w-6 h-6" />
+            </div>
+            <h4 className="font-extrabold text-base text-[#123D2A]">Kisan Helpline (Toll-Free)</h4>
+            <p className="text-xs text-[#18251E]/70">Direct agricultural voice assistance in 8 Indian languages</p>
+            <div className="pt-2">
+              <span className="text-lg font-black text-[#123D2A]">1800-180-1551</span>
+              <span className="block text-[11px] text-emerald-700 font-semibold">Toll-free 24x7</span>
+            </div>
+          </div>
+
+          <div className="p-7 rounded-3xl bg-white/85 backdrop-blur-xl border border-white/80 shadow-lg text-center space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-cyan-100 text-cyan-800 flex items-center justify-center mx-auto">
+              <Mail className="w-6 h-6" />
+            </div>
+            <h4 className="font-extrabold text-base text-cyan-950">APMC & Institutional Email</h4>
+            <p className="text-xs text-[#18251E]/70">For bulk procurement orders and marketplace dispute support</p>
+            <div className="pt-2">
+              <span className="text-sm font-extrabold text-cyan-950">support@agritech.gov.in</span>
+              <span className="block text-[11px] text-[#00B8F0] font-semibold">Under 2-hour response</span>
+            </div>
+          </div>
+
+          <div className="p-7 rounded-3xl bg-white/85 backdrop-blur-xl border border-white/80 shadow-lg text-center space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-purple-100 text-purple-800 flex items-center justify-center mx-auto">
+              <MapPin className="w-6 h-6" />
+            </div>
+            <h4 className="font-extrabold text-base text-purple-950">Field Operations Center</h4>
+            <p className="text-xs text-[#18251E]/70">National Agri-Tech Hub, APMC Market Yard Complex</p>
+            <div className="pt-2">
+              <span className="text-xs font-bold text-purple-950">Bengaluru &amp; Kolar Agro-Tech Belt</span>
+              <span className="block text-[11px] text-purple-700 font-semibold">Karnataka, India</span>
+            </div>
           </div>
         </div>
       </section>

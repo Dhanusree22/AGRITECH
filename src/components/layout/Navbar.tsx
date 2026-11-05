@@ -51,10 +51,12 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenVoi
 
   const navLinks = [
     { label: t('Home', 'Home'), path: '/' },
+    { label: t('About Us', 'About Us'), path: '/#about' },
     { label: t('Features', 'Features'), path: '/#features' },
     { label: t('How It Works', 'How It Works'), path: '/#how-it-works' },
     { label: t('AI Intelligence', 'AI Intelligence'), path: '/#ai-intelligence' },
     { label: t('Marketplace', 'Marketplace'), path: '/marketplace' },
+    { label: t('Contact', 'Contact'), path: '/#contact' },
   ];
 
   const handleNavClick = (path: string) => {
@@ -157,18 +159,18 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenVoi
                     setNotifOpen(false);
                   }}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/90 border border-[#123D2A]/15 hover:border-[#10B981] text-xs font-bold text-[#123D2A] transition-all shadow-xs cursor-pointer"
-                  title="Select Language"
+                  title={t('Select Language')}
                 >
                   <Globe className="w-3.5 h-3.5 text-[#10B981]" />
                   <span className="text-sm">{currentLanguageConfig.flag}</span>
-                  <span className="hidden sm:inline">{currentLanguageConfig.nativeName}</span>
+                  <span className="hidden sm:inline font-bold">{currentLanguageConfig.nativeName}</span>
                   <ChevronDown className="w-3.5 h-3.5 text-[#123D2A]/60" />
                 </button>
 
                 {langMenuOpen && (
                   <div className="absolute right-0 mt-2 w-52 bg-white rounded-2xl border border-[#123D2A]/15 shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2">
                     <p className="text-[10px] font-bold text-[#123D2A]/60 px-3 py-1 uppercase tracking-wider">
-                      Select Language (8)
+                      {t('Select Language')} (8)
                     </p>
                     {languages.map((l) => (
                       <button
@@ -185,8 +187,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenVoi
                       >
                         <span className="flex items-center gap-2">
                           <span>{l.flag}</span>
-                          <span>{l.nativeName}</span>
-                          <span className="text-gray-400 text-[10px]">({l.label})</span>
+                          <span className="font-bold">{l.nativeName}</span>
                         </span>
                         {language === l.code && <Check className="w-3.5 h-3.5 text-[#10B981]" />}
                       </button>
@@ -199,10 +200,10 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenVoi
               <button
                 onClick={handleOpenVoice}
                 className="px-3 py-2 rounded-full bg-[#10B981]/15 border border-[#10B981]/30 text-[#123D2A] hover:bg-[#10B981]/25 transition-all flex items-center gap-1.5 text-xs font-bold shadow-xs cursor-pointer group"
-                title="AgriAI Vernacular Voice Assistant"
+                title={t('Vernacular Voice Assistant')}
               >
                 <Mic className="w-4 h-4 text-[#10B981] animate-pulse group-hover:scale-110 transition-transform" />
-                <span className="hidden md:inline font-bold">Voice AI</span>
+                <span className="hidden md:inline font-bold">{t('Voice AI')}</span>
               </button>
 
               {/* Notifications Popover */}
@@ -422,7 +423,32 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenVoi
 
         {/* Mobile Dropdown Navigation */}
         {mobileMenuOpen && (
-          <div className="lg:hidden bg-white/95 backdrop-blur-xl border-b border-[#123D2A]/15 p-4 space-y-2 text-[#123D2A]">
+          <div className="lg:hidden bg-white/95 backdrop-blur-xl border-b border-[#123D2A]/15 p-4 space-y-3 text-[#123D2A]">
+            {/* Mobile Language Selector Grid */}
+            <div className="pb-2 border-b border-gray-100">
+              <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                <span>{t('Select Language')} (8)</span>
+                <span className="text-emerald-700 font-bold">{currentLanguageConfig.nativeName}</span>
+              </div>
+              <div className="grid grid-cols-4 gap-1.5">
+                {languages.map((l) => (
+                  <button
+                    key={l.code}
+                    onClick={() => {
+                      setLanguage(l.code);
+                    }}
+                    className={`py-1.5 px-1 rounded-lg text-center text-xs font-semibold transition ${
+                      language === l.code
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'bg-emerald-50 text-emerald-900 hover:bg-emerald-100'
+                    }`}
+                  >
+                    <div className="text-[11px] font-bold truncate">{l.nativeName}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {navLinks.map((link) => (
               <button
                 key={link.path}
