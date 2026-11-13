@@ -169,7 +169,7 @@ export function getLocalizedCropName(crop: string, lang: LanguageCode): string {
 const MANDI_NAMES: Record<string, Record<LanguageCode, string>> = {
   'Kolar APMC Market': {
     en: 'Kolar APMC Market',
-    kn: 'ಕೋಲಾರ ಎಪಿಎಂಸಿ ಮಾರುಕಟ್ಟೆ',
+    kn: 'ಕೋಲಾರ ಎಪಿಎಂಸಿ',
     hi: 'कोलार एपीएमसी मंडी',
     te: 'కోలార్ మార్కెట్',
     ta: 'கோலார் சந்தை',
@@ -256,17 +256,26 @@ export function getLocalizedMandiName(mandi: string, lang: LanguageCode): string
 }
 
 export function localizeSellingWindow(windowStr: string, lang: LanguageCode): string {
-  if (lang === 'kn') {
-    if (windowStr.includes('24') || windowStr.includes('36') || windowStr.includes('48')) return 'ಮುಂದಿನ 24 ರಿಂದ 48 ಗಂಟೆಗಳಲ್ಲಿ';
-    if (windowStr.includes('4 through 7') || windowStr.includes('7 Days')) return 'ಮುಂದಿನ 4 ರಿಂದ 7 ದಿನಗಳ ಒಳಗೆ';
-    return 'ಮುಂದಿನ 2 ರಿಂದ 3 ದಿನಗಳಲ್ಲಿ';
+  const isShort = windowStr.includes('24') || windowStr.includes('36') || windowStr.includes('48');
+  const isMedium = windowStr.includes('4 through 7') || windowStr.includes('7 Days');
+  switch (lang) {
+    case 'kn':
+      return isShort ? 'ಮುಂದಿನ 24 ರಿಂದ 48 ಗಂಟೆಗಳಲ್ಲಿ' : isMedium ? 'ಮುಂದಿನ 4 ರಿಂದ 7 ದಿನಗಳ ಒಳಗೆ' : 'ಮುಂದಿನ 2 ರಿಂದ 3 ದಿನಗಳಲ್ಲಿ';
+    case 'hi':
+      return isShort ? 'अगले 24 से 48 घंटों में' : isMedium ? 'अगले 4 से 7 दिनों के भीतर' : 'अगले 2 से 3 दिनों में';
+    case 'te':
+      return isShort ? 'రాబోయే 24 నుండి 48 గంటల్లో' : isMedium ? 'రాబోయే 4 నుండి 7 రోజుల్లో' : 'రాబోయే 2 నుండి 3 రోజుల్లో';
+    case 'ta':
+      return isShort ? 'அடுத்த 24 முதல் 48 மணி நேரத்தில்' : isMedium ? 'அடுத்த 4 முதல் 7 நாட்களில்' : 'அடுத்த 2 முதல் 3 நாட்களில்';
+    case 'ml':
+      return isShort ? 'അടുത്ത 24 മുതൽ 48 മണിക്കൂറിനുള്ളിൽ' : isMedium ? 'അടുത്ത 4 മുതൽ 7 ദിവസത്തിനുള്ളിൽ' : 'അടുത്ത 2 മുതൽ 3 ദിവസത്തിനുള്ളിൽ';
+    case 'mr':
+      return isShort ? 'पुढील 24 ते 48 तासांत' : isMedium ? 'पुढील 4 ते 7 दिवसांत' : 'पुढील 2 ते 3 दिवसांत';
+    case 'bn':
+      return isShort ? 'আগামী ২৪ থেকে ৪৮ ঘণ্টার মধ্যে' : isMedium ? 'আগামী ৪ থেকে ৭ দিনের মধ্যে' : 'আগামী ২ থেকে ৩ দিনের মধ্যে';
+    default:
+      return windowStr;
   }
-  if (lang === 'hi') {
-    if (windowStr.includes('24') || windowStr.includes('36') || windowStr.includes('48')) return 'अगले 24 से 48 घंटों में';
-    if (windowStr.includes('4 through 7') || windowStr.includes('7 Days')) return 'अगले 4 से 7 दिनों के भीतर';
-    return 'अगले 2 से 3 दिनों में';
-  }
-  return windowStr;
 }
 
 export class DynamicResponseGenerator {
@@ -376,23 +385,26 @@ export class DynamicResponseGenerator {
           }
         }
 
+        const highestMandi = getLocalizedMandiName(highest.mandi, lang);
+        const lowestMandi = getLocalizedMandiName(lowest.mandi, lang);
+
         switch (lang) {
           case 'kn':
-            return `${cropName} ಗೆ ಅತ್ಯಂತ ಗರಿಷ್ಠ ಬೆಲೆ ನೀಡುತ್ತಿರುವ ಮಂಡಿ: ${highest.mandi} (ದರ: ₹${highest.pricePerKg}/ಕೆಜಿ ಅಥವಾ ₹${highest.modalPrice}/ಕ್ವಿಂಟಾಲ್). ಅತ್ಯಂತ ಕಡಿಮೆ ಬೆಲೆ ಇರುವ ಮಂಡಿ: ${lowest.mandi} (ದರ: ₹${lowest.pricePerKg}/ಕೆಜಿ). ಈ ಎರಡು ಮಂಡಿಗಳ ನಡುವೆ ಕ್ವಿಂಟಾಲ್‌ಗೆ ₹${highest.modalPrice - lowest.modalPrice} ವ್ಯತ್ಯಾಸವಿದ್ದು, ದೂರ ಮತ್ತು ಸಾರಿಗೆ ವೆಚ್ಚ ಲೆಕ್ಕಹಾಕಿ ಉತ್ತಮ ಮಂಡಿಗೆ ಸಾಗಿಸಿ.`;
+            return `${cropName} ಗೆ ಅತ್ಯಂತ ಗರಿಷ್ಠ ಬೆಲೆ ನೀಡುತ್ತಿರುವ ಮಂಡಿ: ${highestMandi} (ದರ: ₹${highest.pricePerKg}/ಕೆಜಿ ಅಥವಾ ₹${highest.modalPrice}/ಕ್ವಿಂಟಾಲ್). ಅತ್ಯಂತ ಕಡಿಮೆ ಬೆಲೆ ಇರುವ ಮಂಡಿ: ${lowestMandi} (ದರ: ₹${lowest.pricePerKg}/ಕೆಜಿ). ಈ ಎರಡು ಮಂಡಿಗಳ ನಡುವೆ ಕ್ವಿಂಟಾಲ್‌ಗೆ ₹${highest.modalPrice - lowest.modalPrice} ವ್ಯತ್ಯಾಸವಿದ್ದು, ದೂರ ಮತ್ತು ಸಾರಿಗೆ ವೆಚ್ಚ ಲೆಕ್ಕಹಾಕಿ ಉತ್ತಮ ಮಂಡಿಗೆ ಸಾಗಿಸಿ.`;
           case 'hi':
-            return `${cropName} के लिए सबसे अधिक भाव देने वाली मंडी ${highest.mandi} है (भाव: ₹${highest.pricePerKg}/किलो यानी ₹${highest.modalPrice}/क्विंटल)। सबसे कम भाव ${lowest.mandi} में ₹${lowest.pricePerKg}/किलो है। दोनों के बीच ₹${highest.modalPrice - lowest.modalPrice}/क्विंटल का अंतर है।`;
+            return `${cropName} के लिए सबसे अधिक भाव देने वाली मंडी ${highestMandi} है (भाव: ₹${highest.pricePerKg}/किलो यानी ₹${highest.modalPrice}/क्विंटल)। सबसे कम भाव ${lowestMandi} में ₹${lowest.pricePerKg}/किलो है। दोनों के बीच ₹${highest.modalPrice - lowest.modalPrice}/क्विंटल का अंतर है।`;
           case 'te':
-            return `${cropName} కోసం అత్యధిక ధర ఇస్తున్న మార్కెట్: ${highest.mandi} (ధర: కిలోకు ₹${highest.pricePerKg}). అత్యల్ప ధర: ${lowest.mandi} (కిలోకు ₹${lowest.pricePerKg}). క్వింటాలుకు వ్యత్యాసం ₹${highest.modalPrice - lowest.modalPrice}.`;
+            return `${cropName} కోసం అత్యధిక ధర ఇస్తున్న మార్కెట్: ${highestMandi} (ధర: కిలోకు ₹${highest.pricePerKg}). అత్యల్ప ధర: ${lowestMandi} (కిలోకు ₹${lowest.pricePerKg}). క్వింటాలుకు వ్యత్యాసం ₹${highest.modalPrice - lowest.modalPrice}.`;
           case 'ta':
-            return `${cropName} பயிருக்கு அதிகபட்ச விலை வழங்கும் சந்தை: ${highest.mandi} (விலை: ₹${highest.pricePerKg}/கிலோ). குறைந்தபட்ச சந்தை: ${lowest.mandi} (விலை: ₹${lowest.pricePerKg}/கிலோ). விலை வேறுபாடு குவிண்டாலுக்கு ₹${highest.modalPrice - lowest.modalPrice}.`;
+            return `${cropName} பயிருக்கு அதிகபட்ச விலை வழங்கும் சந்தை: ${highestMandi} (விலை: ₹${highest.pricePerKg}/கிலோ). குறைந்தபட்ச சந்தை: ${lowestMandi} (விலை: ₹${lowest.pricePerKg}/கிலோ). விலை வேறுபாடு குவிண்டாலுக்கு ₹${highest.modalPrice - lowest.modalPrice}.`;
           case 'ml':
-            return `${cropName} ഏറ്റവും ഉയർന്ന നിരക്ക് നൽകുന്ന മാർക്കറ്റ്: ${highest.mandi} (കിലോയ്ക്ക് ₹${highest.pricePerKg}). ഏറ്റവും കുറഞ്ഞ നിരക്ക്: ${lowest.mandi} (കിലോയ്ക്ക് ₹${lowest.pricePerKg}).`;
+            return `${cropName} ഏറ്റവും ഉയർന്ന നിരക്ക് നൽകുന്ന മാർക്കറ്റ്: ${highestMandi} (കിലോയ്ക്ക് ₹${highest.pricePerKg}). ഏറ്റവും കുറഞ്ഞ നിരക്ക്: ${lowestMandi} (കിലോയ്ക്ക് ₹${lowest.pricePerKg}).`;
           case 'mr':
-            return `${cropName} साठी सर्वाधिक भाव देणारी बाजार समिती: ${highest.mandi} (दर: ₹${highest.pricePerKg}/किलो). सर्वात कमी भाव: ${lowest.mandi} (दर: ₹${lowest.pricePerKg}/किलो). क्विंटलमागे फरक ₹${highest.modalPrice - lowest.modalPrice} आहे.`;
+            return `${cropName} साठी सर्वाधिक भाव देणारी बाजार समिती: ${highestMandi} (दर: ₹${highest.pricePerKg}/किलो). सर्वात कमी भाव: ${lowestMandi} (दर: ₹${lowest.pricePerKg}/किलो). क्विंटलमागे फरक ₹${highest.modalPrice - lowest.modalPrice} आहे.`;
           case 'bn':
-            return `${cropName} এর জন্য সর্বোচ্চ দর প্রদানকারী মান্ডি হলো ${highest.mandi} (দর: প্রতি কেজি ₹${highest.pricePerKg})। সর্বনিম্ন দর ${lowest.mandi} (প্রতি কেজি ₹${lowest.pricePerKg})।`;
+            return `${cropName} এর জন্য সর্বোচ্চ দর প্রদানকারী মান্ডি হলো ${highestMandi} (দর: প্রতি কেজি ₹${highest.pricePerKg})। সর্বনিম্ন দর ${lowestMandi} (প্রতি কেজি ₹${lowest.pricePerKg})।`;
           default:
-            return `The mandi offering the highest price for ${cropName} is ${highest.mandi} at ₹${highest.pricePerKg}/kg (₹${highest.modalPrice}/quintal). The lowest rate is at ${lowest.mandi} at ₹${lowest.pricePerKg}/kg. That creates an arbitrage spread of ₹${highest.modalPrice - lowest.modalPrice}/quintal. Consider factoring in transport logistics to maximize your net farm-gate profit.`;
+            return `The mandi offering the highest price for ${cropName} is ${highestMandi} at ₹${highest.pricePerKg}/kg (₹${highest.modalPrice}/quintal). The lowest rate is at ${lowestMandi} at ₹${lowest.pricePerKg}/kg. That creates an arbitrage spread of ₹${highest.modalPrice - lowest.modalPrice}/quintal. Consider factoring in transport logistics to maximize your net farm-gate profit.`;
         }
       }
 
@@ -444,12 +456,22 @@ export class DynamicResponseGenerator {
       }
 
       case 'FERTILIZER_SOIL': {
-        const { fertilizerNPK, soil } = data;
+        const { fertilizerNPK } = data;
         switch (lang) {
           case 'kn':
             return `${cropName} ಬೆಳೆಯ ರಸಗೊಬ್ಬರ ಶಿಫಾರಸು: ಆರಂಭಿಕವಾಗಿ (ಬೇಸಲ್): ${fertilizerNPK.basal} ಮೇಲುಗೊಬ್ಬರ: ${fertilizerNPK.topDressing} ಲಘು ಪೋಷಕಾಂಶ: ${fertilizerNPK.micronutrients}`;
           case 'hi':
             return `${cropName} के लिए उर्वरक प्रबंधन: बुवाई के समय (बेसल): ${fertilizerNPK.basal} टॉप ड्रेसिंग: ${fertilizerNPK.topDressing} सूक्ष्म पोषक तत्व: ${fertilizerNPK.micronutrients}।`;
+          case 'te':
+            return `${cropName} కోసం ఎరువుల షెడ్యూల్: ప్రాథమిక ఎరువు: ${fertilizerNPK.basal} టాప్ డ్రెస్సింగ్: ${fertilizerNPK.topDressing} సూక్ష్మ పోషకాలు: ${fertilizerNPK.micronutrients}.`;
+          case 'ta':
+            return `${cropName} உர மேலாண்மை: அடி உரம்: ${fertilizerNPK.basal} மேலுரம்: ${fertilizerNPK.topDressing} நுண்ணூட்டச்சத்து: ${fertilizerNPK.micronutrients}.`;
+          case 'ml':
+            return `${cropName} വളപ്രയോഗം: അടിവളം: ${fertilizerNPK.basal} മേൽവളം: ${fertilizerNPK.topDressing}.`;
+          case 'mr':
+            return `${cropName} साठी खत व्यवस्थापन: पेरणीच्या वेळी: ${fertilizerNPK.basal} वरखत: ${fertilizerNPK.topDressing} सूक्ष्म अन्नद्रव्ये: ${fertilizerNPK.micronutrients}.`;
+          case 'bn':
+            return `${cropName} এর সার ব্যবস্থাপনা: মূল সার: ${fertilizerNPK.basal} উপরি প্রয়োগ: ${fertilizerNPK.topDressing} অনুখাদ্য: ${fertilizerNPK.micronutrients}।`;
           default:
             return `Fertilizer schedule for ${cropName}: Basal application: ${fertilizerNPK.basal} Top dressing: ${fertilizerNPK.topDressing} Micronutrients: ${fertilizerNPK.micronutrients}`;
         }
@@ -462,6 +484,16 @@ export class DynamicResponseGenerator {
             return `${cropName} ಕಟಾವು ಮತ್ತು ಶೇಖರಣೆ ಮಾರ್ಗದರ್ಶಿ: ಕಟಾವಿನ ಹಂತ: ${harvestAndStorage.maturitySigns} ಶೇಖರಣಾ ಆಯಸ್ಸು: ${harvestAndStorage.shelfLifeDays} ದಿನಗಳು. ಸುರಕ್ಷಿತ ಗೋದಾಮು: ${harvestAndStorage.safeStorageConditions} ಕಟಾವು ನಂತರ: ${harvestAndStorage.curingAndPostHarvest}`;
           case 'hi':
             return `${cropName} तुड़ाई और भंडारण: परिपक्वता लक्षण: ${harvestAndStorage.maturitySigns} सुरक्षित भंडारण: ${harvestAndStorage.safeStorageConditions} सुरक्षित शेल्फ-लाइफ: ${harvestAndStorage.shelfLifeDays} दिन।`;
+          case 'te':
+            return `${cropName} కోత మరియు నిల్వ మార్గదర్శి: పక్వత లక్షణాలు: ${harvestAndStorage.maturitySigns} నిల్వ సమయం: ${harvestAndStorage.shelfLifeDays} రోజులు. సురక్షిత నిల్వ: ${harvestAndStorage.safeStorageConditions}`;
+          case 'ta':
+            return `${cropName} அறுவடை மற்றும் சேமிப்பு: முதிர்ச்சி அறிகுறி: ${harvestAndStorage.maturitySigns} சேமிப்பு காலம்: ${harvestAndStorage.shelfLifeDays} நாட்கள். பாதுகாப்பான சேமிப்பு: ${harvestAndStorage.safeStorageConditions}`;
+          case 'ml':
+            return `${cropName} വിളവെടുപ്പും സംഭരണവും: പാകമാകുന്ന ലക്ഷണങ്ങൾ: ${harvestAndStorage.maturitySigns} സൂക്ഷിക്കാവുന്ന കാലാവധി: ${harvestAndStorage.shelfLifeDays} ദിവസം.`;
+          case 'mr':
+            return `${cropName} काढणी व साठवणूक: पक्वतेची लक्षणे: ${harvestAndStorage.maturitySigns} साठवणूक कालावधी: ${harvestAndStorage.shelfLifeDays} दिवस. सुरक्षित साठवण: ${harvestAndStorage.safeStorageConditions}`;
+          case 'bn':
+            return `${cropName} ফসল কাটা ও সংরক্ষণ: পরিপক্কতার লক্ষণ: ${harvestAndStorage.maturitySigns} সংরক্ষণ সময়কাল: ${harvestAndStorage.shelfLifeDays} দিন। নিরাপদ সংরক্ষণ: ${harvestAndStorage.safeStorageConditions}`;
           default:
             return `Harvesting & storage guidelines for ${cropName}: Maturity signs: ${harvestAndStorage.maturitySigns} Safe shelf life: ${harvestAndStorage.shelfLifeDays} days. Recommended storage conditions: ${harvestAndStorage.safeStorageConditions} Post-harvest handling: ${harvestAndStorage.curingAndPostHarvest}`;
         }
@@ -511,12 +543,22 @@ export class DynamicResponseGenerator {
       }
 
       case 'TRADING_BUYERS': {
-        const { verifiedBuyersCount, buyerTypes } = data;
+        const { verifiedBuyersCount } = data;
         switch (lang) {
           case 'kn':
             return `ಅಗ್ರಿಟೆಕ್ ವೇದಿಕೆಯಲ್ಲಿ ಪ್ರಸ್ತುತ ${verifiedBuyersCount} ಕ್ಕೂ ಹೆಚ್ಚು ಪರಿಶೀಲಿಸಿದ ಸಗಟು ಖರೀದಿದಾರರು ಮತ್ತು ಸೂಪರ್‌ಮಾರ್ಕೆಟ್ ನೆಟ್‌ವರ್ಕ್‌ಗಳು ${cropName} ಖರೀದಿಸಲು ಸಿದ್ಧರಾಗಿದ್ದಾರೆ. ನಿಮ್ಮ ಬೆಳೆ ವಿವರಗಳನ್ನು 'ರೈತರ ಮಾರಾಟ ಪಟ್ಟಿ'ಯಲ್ಲಿ ನೋಂದಾಯಿಸಿ; ಖರೀದಿದಾರರು ತಕ್ಷಣ ನೇರ ದರ ನೀಡಿ ಎಸ್ಕ್ರೋ ಭದ್ರತೆಯೊಂದಿಗೆ ಖರೀದಿಸುತ್ತಾರೆ.`;
           case 'hi':
             return `एग्रीटेक पर वर्तमान में ${verifiedBuyersCount} सत्यापित थोक खरीदार और रिटेल चेन ${cropName} खरीदने के लिए सक्रिय हैं। आप 'किसान मॉड्यूल' में अपनी फसल लिस्ट कर सकते हैं, जहाँ सुरक्षित एस्क्रो अनुबंध के साथ सीधे खेत से पिकअप सुविधा उपलब्ध है।`;
+          case 'te':
+            return `అగ్రిటెక్‌లో ప్రస్తుతం ${verifiedBuyersCount} మంది ధృవీకరించబడిన హోల్‌సేల్ కొనుగోలుదారులు ${cropName} కొనుగోలు చేయడానికి సిద్ధంగా ఉన్నారు. రైతు మాడ్యూల్‌లో మీ పంటను నమోదు చేయండి.`;
+          case 'ta':
+            return `அக்ரிடெக் தளத்தில் தற்போது ${verifiedBuyersCount} சரிபார்க்கப்பட்ட மொத்த வியாபாரிகள் ${cropName} வாங்கத் தயாராக உள்ளனர். விவசாயி விற்பனைப் பகுதியில் உங்கள் விளைபொருளைப் பதிவு செய்யுங்கள்.`;
+          case 'ml':
+            return `അഗ്രിടെക് പ്ലാറ്റ്‌ഫോമിൽ നിലവിൽ ${verifiedBuyersCount} പരിശോധിച്ച മൊത്തക്കച്ചവടക്കാർ ${cropName} വാങ്ങാൻ തയ്യാറാണ്.`;
+          case 'mr':
+            return `एग्रीटेकवर सध्या ${verifiedBuyersCount} पडताळणी केलेले घाऊक खरेदीदार ${cropName} खरेदी करण्यासाठी सक्रिय आहेत. तुम्ही शेतकरी विभागातून थेट विक्री करू शकता.`;
+          case 'bn':
+            return `এগ্রিটেক প্ল্যাটফর্মে বর্তমানে ${verifiedBuyersCount} জন যাচাইকৃত পাইকারি ক্রেতা ${cropName} কেনার জন্য সক্রিয় রয়েছেন।`;
           default:
             return `There are currently ${verifiedBuyersCount} verified institutional buyers and retail aggregators actively quoting live purchase orders for ${cropName} on AGRITECH. You can list your crop lot in the Farmer Selling module to receive guaranteed purchase offers with zero middleman deductions.`;
         }
@@ -528,6 +570,16 @@ export class DynamicResponseGenerator {
             return `ಅಗ್ರಿಟೆಕ್‌ನಲ್ಲಿ ಹಣ ಪಾವತಿಯು 100% ಸುರಕ್ಷಿತ ಎಸ್ಕ್ರೋ ವ್ಯವಸ್ಥೆಯ ಮೂಲಕ ನಡೆಯುತ್ತದೆ. ಖರೀದಿದಾರರು ಆರ್ಡರ್ ಖಚಿತಪಡಿಸಿದಾಗ ಮೊತ್ತವು ಡಿಜಿಟಲ್ ಎಸ್ಕ್ರೋ ಖಾತೆಯಲ್ಲಿ ಭದ್ರವಾಗಿರುತ್ತದೆ. ಮಂಡಿಯಲ್ಲಿ ತೂಕ ಪರಿಶೀಲನೆಯಾದ ತಕ್ಷಣ ಯಾವುದೇ ಮಧ್ಯವರ್ತಿ ಕಮಿಷನ್ ಇಲ್ಲದೆ ನೇರವಾಗಿ ನಿಮ್ಮ ಬ್ಯಾಂಕ್ ಖಾತೆ ಅಥವಾ ಯುಪಿಐಗೆ ಹಣ ಜಮೆಯಾಗುತ್ತದೆ.`;
           case 'hi':
             return `एग्रीटेक पर भुगतान 100% सुरक्षित डिजिटल एस्क्रो के माध्यम से होता है। खरीदार द्वारा ऑर्डर बुक करते ही राशि बैंक एस्क्रो में सुरक्षित जमा हो जाती है। मंडी में माल की तौल रसीद सत्यापित होते ही बिना किसी दलाली या कटौती के सीधे आपके बैंक खाते में भुगतान हो जाता है।`;
+          case 'te':
+            return `అగ్రిటెక్‌లో చెల్లింపులు 100% సురక్షితమైన డిజిటల్ ఎస్క్రో ద్వారా జరుగుతాయి. సరుకు డెలివరీ అయిన వెంటనే మధ్యవర్తులు లేకుండా నేరుగా మీ బ్యాంకు ఖాతాకు డబ్బు జమ అవుతుంది.`;
+          case 'ta':
+            return `அக்ரிடெக்கில் பணம் செலுத்துதல் 100% பாதுகாப்பான டிஜிட்டல் எஸ்க்ரோ மூலம் நடைபெறுகிறது. பொருட்கள் வழங்கப்பட்டவுடன் இடைத்தரகர்கள் இன்றி நேரடியாக உங்கள் வங்கிக் கணக்கில் பணம் வரவு வைக்கப்படும்.`;
+          case 'ml':
+            return `അഗ്രിടെക്കിൽ പേയ്‌മെന്റുകൾ 100% സുരക്ഷിതമായ ഡിജിറ്റൽ എസ്ക്രോ വഴിയാണ് നടക്കുന്നത്. ഉൽപ്പന്നം കൈമാറുമ്പോൾ തന്നെ തുക നേരിട്ട് നിങ്ങളുടെ അക്കൗണ്ടിലെത്തും.`;
+          case 'mr':
+            return `एग्रीटेकवर पेमेंट 100% सुरक्षित डिजिटल एस्क्रो प्रणालीद्वारे होते. मालाची डिलिव्हरी होताच कोणतीही मध्यस्थी न राहता थेट तुमच्या बँक खात्यात पैसे जमा होतात.`;
+          case 'bn':
+            return `এগ্রিটেক-এ পেমেন্ট ১০০% নিরাপদ ডিজিটাল এসক্রো সিস্টেমের মাধ্যমে হয়। পণ্য ডেলিভারির সাথে সাথেই সরাসরি আপনার ব্যাংক অ্যাকাউন্টে টাকা জমা হয়।`;
           default:
             return `Payments on AGRITECH are secured through a 100% digital bank-backed escrow system. When a buyer confirms an order, funds are locked in escrow prior to dispatch. Once your goods are delivered and the weighbridge slip is verified, payment is credited immediately to your linked bank account or UPI with zero unauthorized deductions.`;
         }
@@ -539,6 +591,16 @@ export class DynamicResponseGenerator {
             return `ಅಗ್ರಿಟೆಕ್ ವೇದಿಕೆಯ ಮುಖ್ಯ ಸೌಲಭ್ಯಗಳು: 1) ಲೈವ್ ಮಾರುಕಟ್ಟೆ ದರಗಳು (14 ಎಪಿಎಂಸಿ ಮಂಡಿಗಳು), 2) AI ಬೆಲೆ ಮುನ್ಸೂಚನೆ ಸಾಧನ (7 ರಿಂದ 30 ದಿನಗಳು), 3) ನೇರ ಖರೀದಿದಾರರ ಮಾರುಕಟ್ಟೆ, ಮತ್ತು 4) 100% ಎಸ್ಕ್ರೋ ಪಾವತಿ ಭದ್ರತೆ. ಮೇಲಿನ ಮೆನುವಿನಿಂದ ಯಾವುದೇ ವಿಭಾಗಕ್ಕೆ ಸುಲಭವಾಗಿ ಪ್ರವೇಶಿಸಬಹುದು.`;
           case 'hi':
             return `एग्रीटेक की मुख्य सुविधाएं: 1) 14 एपीएमसी मंडियों के लाइव भाव, 2) एआई मूल्य भविष्यवाणी टूल (7 से 30 दिन), 3) सत्यापित थोक खरीदार मार्केटप्लेस, और 4) एस्क्रो भुगतान सुरक्षा। आप ऊपर दिए गए नेविगेशन मेनू से सीधे इन सुविधाओं का उपयोग कर सकते हैं।`;
+          case 'te':
+            return `అగ్రిటెక్ ముఖ్య ఫీచర్లు: 1) 14 APMC మార్కెట్ల లైవ్ ధరలు, 2) AI ధర అంచనా టూల్, 3) నేరుగా కొనుగోలుదారుల మార్కెట్, 4) 100% ఎస్క్రో చెల్లింపు భద్రత.`;
+          case 'ta':
+            return `அக்ரிடெக் முக்கிய அம்சங்கள்: 1) 14 APMC சந்தைகளின் நேரடி விலைகள், 2) AI விலை கணிப்பு கருவி, 3) நேரடி கொள்முதல் சந்தை, 4) 100% எஸ்க்ரோ பாதுகாப்பு.`;
+          case 'ml':
+            return `അഗ്രിടെക് പ്രധാന സൗകര്യങ്ങൾ: 1) 14 APMC മാർക്കറ്റുകളിലെ തത്സമയ നിരക്കുകൾ, 2) AI വില പ്രവചനം, 3) നേരിട്ടുള്ള വിപണി, 4) 100% എസ്ക്രോ സുരക്ഷ.`;
+          case 'mr':
+            return `एग्रीटेकची मुख्य वैशिष्ट्ये: 1) 14 APMC बाजारांचे थेट दर, 2) AI भाव अंदाज साधन, 3) थेट खरेदीदार बाजारपेठ, 4) 100% एस्क्रो पेमेंट सुरक्षा.`;
+          case 'bn':
+            return `এগ্রিটেক-এর মূল সুবিধাসমূহ: ১) ১৪টি মান্ডির লাইভ দর, ২) এআই মূল্য পূর্বাভাস টুল, ৩) সরাসরি ক্রেতা-বিক্রেতা বাজার, ৪) ১০০% এসক্রো পেমেন্ট সুরক্ষা।`;
           default:
             return `AGRITECH Core Features: 1) Live verified market prices across 14 APMC mandis, 2) AI Price Prediction Tool for 7, 15, and 30-day forecast curves, 3) Direct farmer-to-buyer marketplace with farm-gate logistics, and 4) 100% digital escrow payment safety. Navigate seamlessly using the top menu.`;
         }
