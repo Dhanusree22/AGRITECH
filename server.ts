@@ -215,7 +215,7 @@ Speak directly to the farmer in 2 to 4 clear, respectful, natural spoken sentenc
   app.get('/api/tts', async (req, res) => {
     try {
       const text = (req.query.text as string || '').trim();
-      const lang = (req.query.lang as string || 'kn').trim();
+      const lang = (req.query.lang as string || 'kn').trim().toLowerCase().split('-')[0];
       if (!text) {
         return res.status(400).send('Text parameter is required');
       }
@@ -260,24 +260,34 @@ Speak directly to the farmer in 2 to 4 clear, respectful, natural spoken sentenc
       }
       if (currentChunk) chunks.push(currentChunk);
 
-      const targetChunks = (chunks.length > 0 ? chunks : [cleanText.slice(0, 180)]).slice(0, 4);
+      const targetChunks = (chunks.length > 0 ? chunks : [cleanText.slice(0, 180)]).slice(0, 12);
 
       const audioBuffers: Buffer[] = [];
       for (const c of targetChunks) {
-        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(c)}&tl=${encodeURIComponent(lang)}&client=tw-ob`;
-        try {
-          const upstream = await fetch(ttsUrl, {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-              'Referer': 'https://translate.google.com/',
-            },
-          });
-          if (upstream.ok) {
-            const arr = await upstream.arrayBuffer();
-            audioBuffers.push(Buffer.from(arr));
+        const clients = ['tw-ob', 'gtx'];
+        for (const client of clients) {
+          const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(c)}&tl=${encodeURIComponent(lang)}&client=${client}`;
+          try {
+            const upstream = await fetch(ttsUrl, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                'Referer': 'https://translate.google.com/',
+                'Accept': 'audio/mpeg, audio/*;q=0.9, */*;q=0.8',
+              },
+            });
+            if (upstream.ok) {
+              const contentType = (upstream.headers.get('content-type') || '').toLowerCase();
+              if (contentType.includes('audio') || contentType.includes('octet-stream')) {
+                const arr = await upstream.arrayBuffer();
+                if (arr.byteLength > 64) {
+                  audioBuffers.push(Buffer.from(arr));
+                  break;
+                }
+              }
+            }
+          } catch {
+            // continue with next client
           }
-        } catch {
-          // continue with remaining chunks
         }
       }
 

@@ -20,6 +20,7 @@ import { useLanguage } from '../../context/LanguageContext';
 import { useAuth } from '../../context/AuthContext';
 import { LanguageCode } from '../../types';
 import { aiAgentController } from '../../services/aiAgent/aiAgentController';
+import { ttsController } from '../../services/ttsService';
 
 export const AIChatbotWidget: React.FC = () => {
   const { language, currentLanguageConfig, t, languages, setLanguage } = useLanguage();
@@ -43,6 +44,7 @@ export const AIChatbotWidget: React.FC = () => {
   const recognitionRef = useRef<any>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const sessionIdRef = useRef<string>('chat-session-' + Date.now());
+  const speakTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const getGreetingForLang = useCallback((lang: LanguageCode) => {
     switch (lang) {
@@ -96,117 +98,60 @@ export const AIChatbotWidget: React.FC = () => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
-  // Stop active speech / audio
+  // Stop active speech, pending auto-speak timers, or audio
   const stopSpeech = () => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
+    if (speakTimerRef.current) {
+      clearTimeout(speakTimerRef.current);
+      speakTimerRef.current = null;
     }
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
+    ttsController.stop();
     setIsSpeaking(false);
     setSpeakingMessageId(null);
   };
 
-  // Prime audio on user gesture to avoid browser autoplay restrictions
+  useEffect(() => {
+    return () => {
+      stopSpeech();
+    };
+  }, []);
+
+  // Prime audio cleanly on user gesture without triggering abort errors
   const primeAudioContext = () => {
     try {
-      if (!audioRef.current) {
-        audioRef.current = new Audio();
+      const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        if (ctx.state === 'suspended') {
+          ctx.resume().catch(() => {});
+        }
+        ctx.close().catch(() => {});
       }
     } catch {
       // ignore
     }
   };
 
-  // Speak text in selected language (e.g., Kannada)
+  // Speak text cleanly in selected language via unified Cloud HD + verified browser TTS controller
   const speakText = (text: string, messageId?: string) => {
     stopSpeech();
-    primeAudioContext();
-
-    const clean = text
-      .replace(/[*#_`~[\]()]/g, '')
-      .replace(/[\u{1F600}-\u{1F6FF}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    if (!clean) return;
 
     if (messageId) {
       setSpeakingMessageId(messageId);
     }
-    setIsSpeaking(true);
 
-    // Primary: Google TTS Proxy endpoint configured for target language (e.g., 'kn' for Kannada)
-    const ttsUrl = `/api/tts?text=${encodeURIComponent(clean)}&lang=${encodeURIComponent(language)}`;
-
-    const audio = audioRef.current || new Audio();
-    audioRef.current = audio;
-    audio.src = ttsUrl;
-
-    audio.onplay = () => {
-      setIsSpeaking(true);
-    };
-
-    audio.onended = () => {
-      setIsSpeaking(false);
-      setSpeakingMessageId(null);
-    };
-
-    audio.onerror = () => {
-      // Fallback to browser SpeechSynthesis
-      try {
-        if ('speechSynthesis' in window) {
-          const utterance = new SpeechSynthesisUtterance(clean);
-          utterance.lang = currentLanguageConfig.speechCode;
-          utterance.rate = 0.95;
-
-          const voices = window.speechSynthesis.getVoices();
-          const targetCode = currentLanguageConfig.speechCode.toLowerCase();
-          const langShort = currentLanguageConfig.code.toLowerCase();
-
-          const matchedVoice = voices.find(
-            (v) =>
-              v.lang.toLowerCase() === targetCode ||
-              v.lang.toLowerCase().replace('_', '-').startsWith(langShort) ||
-              v.name.toLowerCase().includes(currentLanguageConfig.label.toLowerCase())
-          );
-          if (matchedVoice) {
-            utterance.voice = matchedVoice;
-          }
-
-          utterance.onend = () => {
-            setIsSpeaking(false);
-            setSpeakingMessageId(null);
-          };
-          utterance.onerror = () => {
-            setIsSpeaking(false);
-            setSpeakingMessageId(null);
-          };
-
-          window.speechSynthesis.speak(utterance);
-        } else {
-          setIsSpeaking(false);
-          setSpeakingMessageId(null);
-        }
-      } catch {
+    ttsController.speak({
+      text,
+      langConfig: currentLanguageConfig,
+      voiceEngine: 'cloud',
+      speechSpeed: 0.95,
+      audioElement: audioRef.current,
+      onStart: () => {
+        setIsSpeaking(true);
+      },
+      onEnd: () => {
         setIsSpeaking(false);
         setSpeakingMessageId(null);
-      }
-    };
-
-    audio.play().catch(() => {
-      // If browser blocked play(), try browser SpeechSynthesis fallback
-      try {
-        if ('speechSynthesis' in window) {
-          const utterance = new SpeechSynthesisUtterance(clean);
-          utterance.lang = currentLanguageConfig.speechCode;
-          window.speechSynthesis.speak(utterance);
-        }
-      } catch {
-        // ignore
-      }
+      },
     });
   };
 
@@ -246,7 +191,8 @@ export const AIChatbotWidget: React.FC = () => {
           }),
         });
 
-        if (res.ok) {
+        const contentType = (res.headers.get('content-type') || '').toLowerCase();
+        if (res.ok && contentType.includes('application/json')) {
           const data = await res.json();
           aiReply = data.reply;
         }
@@ -279,7 +225,7 @@ export const AIChatbotWidget: React.FC = () => {
 
       // Automatically speak the answer in selected language if autoVoice is on
       if (autoVoice) {
-        setTimeout(() => {
+        speakTimerRef.current = setTimeout(() => {
           speakText(aiReply, aiMsgId);
         }, 150);
       }

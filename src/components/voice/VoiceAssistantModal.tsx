@@ -21,6 +21,7 @@ import { useLanguage } from '../../context/LanguageContext';
 import { useAuth } from '../../context/AuthContext';
 import { LanguageCode } from '../../types';
 import { aiAgentController } from '../../services/aiAgent/aiAgentController';
+import { ttsController, findBestBrowserVoice } from '../../services/ttsService';
 
 interface VoiceAssistantModalProps {
   isOpen: boolean;
@@ -50,6 +51,7 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
   const synthRef = useRef<SpeechSynthesis | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const sessionIdRef = useRef<string>('voice-session-' + Date.now());
+  const speakTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const getInitialGreeting = useCallback((lang: LanguageCode) => {
     switch (lang) {
@@ -81,31 +83,34 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
     },
   ]);
 
-  // Prime audio to unlock browser autoplay
+  // Prime audio cleanly on user gesture without calling .load() (which causes abort glitches)
   const primeAudio = () => {
     try {
-      if (audioPlayerRef.current) {
-        audioPlayerRef.current.load();
+      const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        if (ctx.state === 'suspended') {
+          ctx.resume().catch(() => {});
+        }
+        ctx.close().catch(() => {});
       }
     } catch {
       // ignore
     }
   };
 
-  // Stop any active speech or audio
+  // Stop any active speech, pending auto-speak timers, or audio
   const stopAllAudio = () => {
-    if (audioPlayerRef.current) {
-      audioPlayerRef.current.pause();
-      audioPlayerRef.current.currentTime = 0;
+    if (speakTimerRef.current) {
+      clearTimeout(speakTimerRef.current);
+      speakTimerRef.current = null;
     }
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
+    ttsController.stop();
     setIsSpeaking(false);
     setSpeakingMessageId(null);
   };
 
-  // Load and match SpeechSynthesis voices
+  // Load and match SpeechSynthesis voices strictly for the active language
   useEffect(() => {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       synthRef.current = window.speechSynthesis;
@@ -114,25 +119,17 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
         const voices = window.speechSynthesis.getVoices();
         setAvailableVoices(voices);
 
-        const speechCode = currentLanguageConfig.speechCode.toLowerCase();
-        const langShort = currentLanguageConfig.code.toLowerCase();
-
-        const matched = voices.find(
-          (v) =>
-            v.lang.toLowerCase() === speechCode ||
-            v.lang.toLowerCase().replace('_', '-').startsWith(langShort) ||
-            v.name.toLowerCase().includes(currentLanguageConfig.label.toLowerCase())
-        );
-
-        if (matched) {
-          setSelectedVoiceURI(matched.voiceURI);
-        } else if (voices.length > 0) {
-          setSelectedVoiceURI(voices[0].voiceURI);
-        }
+        const matched = findBestBrowserVoice(voices, currentLanguageConfig);
+        // Never fall back to voices[0] (often English) when a regional voice isn't installed locally
+        setSelectedVoiceURI(matched ? matched.voiceURI : '');
       };
 
       updateVoices();
-      window.speechSynthesis.onvoiceschanged = updateVoices;
+      window.speechSynthesis.addEventListener('voiceschanged', updateVoices);
+      return () => {
+        window.speechSynthesis.removeEventListener('voiceschanged', updateVoices);
+        stopAllAudio();
+      };
     }
 
     return () => {
@@ -143,9 +140,18 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
   // When language is switched in modal, update messages greeting and speak if autoSpeak
   const handleLanguageChange = (newLang: LanguageCode) => {
     primeAudio();
-    setLanguage(newLang);
     stopAllAudio();
+    setLanguage(newLang);
     setMicErrorMessage('');
+
+    const newLangConfig = languages.find((l) => l.code === newLang) || currentLanguageConfig;
+    if (synthRef.current) {
+      const matched = findBestBrowserVoice(synthRef.current.getVoices(), newLangConfig);
+      setSelectedVoiceURI(matched ? matched.voiceURI : '');
+    } else {
+      setSelectedVoiceURI('');
+    }
+
     const greeting = getInitialGreeting(newLang);
 
     setMessages((prev) => [
@@ -159,9 +165,9 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
     ]);
 
     if (autoSpeak) {
-      setTimeout(() => {
+      speakTimerRef.current = setTimeout(() => {
         speakText(greeting, newLang);
-      }, 200);
+      }, 150);
     }
   };
 
@@ -169,106 +175,31 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isProcessing]);
 
-  const cleanTextForSpeech = (text: string): string => {
-    return text
-      .replace(/[*#_`~[\]()]/g, '')
-      .replace(/[\u{1F600}-\u{1F6FF}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-  };
-
-  const speakBrowserUtterance = (cleaned: string, targetLangConfig: any) => {
-    if (!synthRef.current) {
-      setIsSpeaking(false);
-      setSpeakingMessageId(null);
-      return;
-    }
-    try {
-      const utterance = new SpeechSynthesisUtterance(cleaned);
-      utterance.lang = targetLangConfig.speechCode;
-      utterance.rate = speechSpeed;
-      utterance.pitch = 1.0;
-
-      const voices = synthRef.current.getVoices();
-      const targetCode = targetLangConfig.speechCode.toLowerCase();
-      const langShort = targetLangConfig.code.toLowerCase();
-
-      let voiceToUse = voices.find((v) => v.voiceURI === selectedVoiceURI);
-      if (!voiceToUse) {
-        voiceToUse = voices.find(
-          (v) =>
-            v.lang.toLowerCase() === targetCode ||
-            v.lang.toLowerCase().replace('_', '-').startsWith(langShort) ||
-            v.name.toLowerCase().includes(targetLangConfig.label.toLowerCase())
-        );
-      }
-
-      if (voiceToUse) {
-        utterance.voice = voiceToUse;
-      }
-
-      utterance.onstart = () => setIsSpeaking(true);
-      utterance.onend = () => {
-        setIsSpeaking(false);
-        setSpeakingMessageId(null);
-      };
-      utterance.onerror = () => {
-        setIsSpeaking(false);
-        setSpeakingMessageId(null);
-      };
-
-      synthRef.current.speak(utterance);
-    } catch {
-      setIsSpeaking(false);
-      setSpeakingMessageId(null);
-    }
-  };
-
   const speakText = (text: string, overrideLang?: LanguageCode, messageId?: string) => {
     stopAllAudio();
-    primeAudio();
-
-    const cleaned = cleanTextForSpeech(text);
-    if (!cleaned) return;
-
-    if (messageId) {
-      setSpeakingMessageId(messageId);
-    }
-    setIsSpeaking(true);
 
     const targetLangCode = overrideLang || language;
     const targetLangConfig = languages.find((l) => l.code === targetLangCode) || currentLanguageConfig;
 
-    if (voiceEngine === 'cloud') {
-      try {
-        const audioUrl = `/api/tts?text=${encodeURIComponent(cleaned)}&lang=${encodeURIComponent(targetLangCode)}`;
-
-        if (audioPlayerRef.current) {
-          audioPlayerRef.current.src = audioUrl;
-          audioPlayerRef.current.playbackRate = speechSpeed;
-
-          audioPlayerRef.current.onplay = () => setIsSpeaking(true);
-          audioPlayerRef.current.onended = () => {
-            setIsSpeaking(false);
-            setSpeakingMessageId(null);
-          };
-          audioPlayerRef.current.onerror = () => {
-            // Cloud audio fallback to browser synthesis
-            speakBrowserUtterance(cleaned, targetLangConfig);
-          };
-
-          audioPlayerRef.current.play().catch(() => {
-            speakBrowserUtterance(cleaned, targetLangConfig);
-          });
-        } else {
-          speakBrowserUtterance(cleaned, targetLangConfig);
-        }
-      } catch {
-        speakBrowserUtterance(cleaned, targetLangConfig);
-      }
-    } else {
-      speakBrowserUtterance(cleaned, targetLangConfig);
+    if (messageId) {
+      setSpeakingMessageId(messageId);
     }
+
+    ttsController.speak({
+      text,
+      langConfig: targetLangConfig,
+      voiceEngine,
+      speechSpeed,
+      preferredVoiceURI: selectedVoiceURI,
+      audioElement: audioPlayerRef.current,
+      onStart: () => {
+        setIsSpeaking(true);
+      },
+      onEnd: () => {
+        setIsSpeaking(false);
+        setSpeakingMessageId(null);
+      },
+    });
   };
 
   // Toggle Speech Recognition with Permission Check & Error Guidance
@@ -432,7 +363,8 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
           }),
         });
 
-        if (res.ok) {
+        const contentType = (res.headers.get('content-type') || '').toLowerCase();
+        if (res.ok && contentType.includes('application/json')) {
           const data = await res.json();
           aiReply = data.reply;
         }
@@ -440,7 +372,7 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
         console.warn('Network call failed, using client-side AI agent engine:', networkErr);
       }
 
-      // If network is offline or Vercel static deployment, execute client-side AI agent engine directly
+      // If network is offline or static deployment fallback needed, execute client-side AI agent engine directly
       if (!aiReply) {
         const agentRes = await aiAgentController.processQuery({
           query: queryText,
@@ -464,9 +396,9 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
       ]);
 
       if (autoSpeak) {
-        setTimeout(() => {
+        speakTimerRef.current = setTimeout(() => {
           speakText(aiReply, undefined, aiMsgId);
-        }, 150);
+        }, 120);
       }
     } catch (finalErr) {
       console.error('Final voice processing error:', finalErr);
