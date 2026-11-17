@@ -21,6 +21,7 @@ import { useAuth } from '../../context/AuthContext';
 import { LanguageCode } from '../../types';
 import { aiAgentController } from '../../services/aiAgent/aiAgentController';
 import { ttsController } from '../../services/ttsService';
+import { voiceRecognitionController } from '../../services/speechRecognitionService';
 
 export const AIChatbotWidget: React.FC = () => {
   const { language, currentLanguageConfig, t, languages, setLanguage } = useLanguage();
@@ -41,7 +42,6 @@ export const AIChatbotWidget: React.FC = () => {
   const [autoVoice, setAutoVoice] = useState(true);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const recognitionRef = useRef<any>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const sessionIdRef = useRef<string>('chat-session-' + Date.now());
   const speakTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -111,6 +111,7 @@ export const AIChatbotWidget: React.FC = () => {
 
   useEffect(() => {
     return () => {
+      voiceRecognitionController.stopListening(false);
       stopSpeech();
     };
   }, []);
@@ -255,126 +256,40 @@ export const AIChatbotWidget: React.FC = () => {
     }
   };
 
-  // Toggle Microphone Speech-to-Text
-  const toggleListening = async () => {
+  // Toggle Microphone Speech-to-Text cleanly (no leaked getUserMedia + automatic MediaRecorder AI fallback)
+  const toggleListening = () => {
     primeAudioContext();
     stopSpeech();
     setMicError('');
 
-    if (isListening) {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch {
-          // ignore
-        }
-      }
+    if (isListening || voiceRecognitionController.isListening()) {
+      voiceRecognitionController.stopListening(true);
       setIsListening(false);
       return;
     }
 
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      setMicError(
-        language === 'kn'
-          ? 'ಈ ಬ್ರೌಸರ್‌ನಲ್ಲಿ ಮೈಕ್ರೊಫೋನ್ ಬೆಂಬಲವಿಲ್ಲ. ಕೆಳಗಿನ ತ್ವರಿತ ಪ್ರಶ್ನೆಗಳನ್ನು ಒತ್ತಿ ಅಥವಾ ಟೈಪ್ ಮಾಡಿ.'
-          : 'Speech recognition not supported in this browser. Please use quick prompts below or type.'
-      );
-      return;
-    }
-
-    try {
-      // Explicitly request mic permission first
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        try {
-          await navigator.mediaDevices.getUserMedia({ audio: true });
-        } catch (permErr: any) {
-          console.warn('Microphone permission request:', permErr);
-          if (permErr.name === 'NotAllowedError' || permErr.name === 'PermissionDeniedError') {
-            setMicError(
-              language === 'kn'
-                ? 'ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ದಯವಿಟ್ಟು ಬ್ರೌಸರ್ ಸೆಟ್ಟಿಂಗ್ಸ್‌ನಲ್ಲಿ ಮೈಕ್ ಆನ್ ಮಾಡಿ.'
-                : 'Microphone permission was denied. Please allow microphone in browser address bar.'
-            );
-            return;
-          }
-        }
-      }
-
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognition.lang = currentLanguageConfig.speechCode;
-
-      recognition.onstart = () => {
+    voiceRecognitionController.startListening({
+      langConfig: currentLanguageConfig,
+      onStart: () => {
         setIsListening(true);
         setMicError('');
-      };
-
-      recognition.onresult = (event: any) => {
-        let interim = '';
-        let final = '';
-        for (let i = 0; i < event.results.length; i++) {
-          if (event.results[i].isFinal) {
-            final += event.results[i][0].transcript;
-          } else {
-            interim += event.results[i][0].transcript;
-          }
-        }
-        const text = final || interim;
+      },
+      onInterimTranscript: (text) => {
         setInput(text);
-
-        if (final.trim()) {
-          try {
-            recognition.stop();
-          } catch {
-            // ignore
-          }
-          setIsListening(false);
-          handleSend(final.trim());
-        }
-      };
-
-      recognition.onerror = (event: any) => {
-        console.warn('Speech recognition event error:', event.error);
+      },
+      onFinalTranscript: (finalText) => {
         setIsListening(false);
-        if (event.error === 'not-allowed') {
-          setMicError(
-            language === 'kn'
-              ? 'ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ಬ್ರೌಸರ್ ಸೆಟ್ಟಿಂಗ್ಸ್‌ನಲ್ಲಿ ಮೈಕ್ ಆನ್ ಮಾಡಿ.'
-              : 'Microphone permission blocked. Please allow mic in browser settings.'
-          );
-        } else if (event.error === 'network') {
-          setMicError(
-            language === 'kn'
-              ? 'ನೆಟ್‌ವರ್ಕ್ ಮೈಕ್ರೊಫೋನ್ ಲಭ್ಯವಿಲ್ಲ. ಕೆಳಗಿನ ತ್ವರಿತ ಧ್ವನಿ ಪ್ರಶ್ನೆಗಳನ್ನು ಬಳಸಿ.'
-              : 'Speech service network error. Tap quick prompts below.'
-          );
-        } else if (event.error === 'no-speech') {
-          setMicError(
-            language === 'kn'
-              ? 'ಯಾವುದೇ ಧ್ವನಿ ಕೇಳಿಸಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೊಮ್ಮೆ ಮಾತನಾಡಿ.'
-              : 'No speech detected. Please speak into your microphone again.'
-          );
-        }
-      };
-
-      recognition.onend = () => {
+        setInput('');
+        void handleSend(finalText);
+      },
+      onError: (errMsg) => {
         setIsListening(false);
-      };
-
-      recognitionRef.current = recognition;
-      recognition.start();
-    } catch (err: any) {
-      console.warn('Recognition start failed:', err);
-      setIsListening(false);
-      setMicError(
-        language === 'kn'
-          ? 'ಮೈಕ್ರೊಫೋನ್ ಪ್ರಾರಂಭಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ಕೆಳಗಿನ ಪ್ರಶ್ನೆಗಳನ್ನು ಬಳಸಿ.'
-          : 'Could not activate microphone. Tap one of the quick questions below.'
-      );
-    }
+        setMicError(errMsg);
+      },
+      onEnd: () => {
+        setIsListening(false);
+      },
+    });
   };
 
   // Sample prompt questions in user's selected language
@@ -509,11 +424,9 @@ export const AIChatbotWidget: React.FC = () => {
                 {/* Close Button */}
                 <button
                   onClick={() => {
+                    voiceRecognitionController.stopListening(false);
+                    setIsListening(false);
                     stopSpeech();
-                    if (isListening && recognitionRef.current) {
-                      recognitionRef.current.stop();
-                      setIsListening(false);
-                    }
                     setIsOpen(false);
                   }}
                   className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
@@ -532,6 +445,8 @@ export const AIChatbotWidget: React.FC = () => {
                 <button
                   key={l.code}
                   onClick={() => {
+                    voiceRecognitionController.stopListening(false);
+                    setIsListening(false);
                     stopSpeech();
                     setLanguage(l.code);
                   }}

@@ -22,6 +22,7 @@ import { useAuth } from '../../context/AuthContext';
 import { LanguageCode } from '../../types';
 import { aiAgentController } from '../../services/aiAgent/aiAgentController';
 import { ttsController, findBestBrowserVoice } from '../../services/ttsService';
+import { voiceRecognitionController } from '../../services/speechRecognitionService';
 
 interface VoiceAssistantModalProps {
   isOpen: boolean;
@@ -46,7 +47,6 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
   const [selectedVoiceURI, setSelectedVoiceURI] = useState<string>('');
   const [showSettings, setShowSettings] = useState(false);
 
-  const recognitionRef = useRef<any>(null);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
   const synthRef = useRef<SpeechSynthesis | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
@@ -128,17 +128,21 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
       window.speechSynthesis.addEventListener('voiceschanged', updateVoices);
       return () => {
         window.speechSynthesis.removeEventListener('voiceschanged', updateVoices);
+        voiceRecognitionController.stopListening(false);
         stopAllAudio();
       };
     }
 
     return () => {
+      voiceRecognitionController.stopListening(false);
       stopAllAudio();
     };
   }, [currentLanguageConfig]);
 
   // When language is switched in modal, update messages greeting and speak if autoSpeak
   const handleLanguageChange = (newLang: LanguageCode) => {
+    voiceRecognitionController.stopListening(false);
+    setIsListening(false);
     primeAudio();
     stopAllAudio();
     setLanguage(newLang);
@@ -202,128 +206,42 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
     });
   };
 
-  // Toggle Speech Recognition with Permission Check & Error Guidance
-  const toggleListening = async () => {
+  // Toggle Speech Recognition cleanly (no leaked getUserMedia + automatic MediaRecorder AI fallback)
+  const toggleListening = () => {
     primeAudio();
     stopAllAudio();
     setMicErrorMessage('');
 
-    if (isListening) {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch {
-          // ignore
-        }
-      }
+    if (isListening || voiceRecognitionController.isListening()) {
+      voiceRecognitionController.stopListening(true);
       setIsListening(false);
       return;
     }
 
     setTranscript('');
 
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      setMicErrorMessage(
-        language === 'kn'
-          ? 'ನಿಮ್ಮ ಬ್ರೌಸರ್‌ನಲ್ಲಿ ಮೈಕ್ರೊಫೋನ್ ಗುರುತಿಸುವಿಕೆ ಬೆಂಬಲಿಸುವುದಿಲ್ಲ. ಕೆಳಗಿನ ತ್ವರಿತ ಪ್ರಶ್ನೆಗಳನ್ನು ಬಳಸಿ ಅಥವಾ ಟೈಪ್ ಮಾಡಿ.'
-          : 'Speech recognition is not supported in this browser. Please use quick prompts below or type your question.'
-      );
-      return;
-    }
-
-    // Try requesting user media permission
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-      try {
-        await navigator.mediaDevices.getUserMedia({ audio: true });
-      } catch (permErr: any) {
-        console.warn('Microphone permission check failed:', permErr);
-        if (permErr.name === 'NotAllowedError' || permErr.name === 'PermissionDeniedError') {
-          setMicErrorMessage(
-            language === 'kn'
-              ? 'ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ನಿರ್ಬಂಧಿಸಲಾಗಿದೆ. ಬ್ರೌಸರ್ ಅಡ್ರೆಸ್ ಬಾರ್‌ನಲ್ಲಿ ಮೈಕ್ ಐಕಾನ್ ಕ್ಲಿಕ್ ಮಾಡಿ ಅನುಮತಿಸಿ.'
-              : 'Microphone permission blocked. Please allow microphone access in your browser address bar.'
-          );
-          return;
-        }
-      }
-    }
-
-    try {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognition.lang = currentLanguageConfig.speechCode;
-
-      recognition.onstart = () => {
+    voiceRecognitionController.startListening({
+      langConfig: currentLanguageConfig,
+      onStart: () => {
         setIsListening(true);
         setMicErrorMessage('');
-      };
-
-      recognition.onresult = (event: any) => {
-        let interim = '';
-        let final = '';
-        for (let i = 0; i < event.results.length; i++) {
-          if (event.results[i].isFinal) {
-            final += event.results[i][0].transcript;
-          } else {
-            interim += event.results[i][0].transcript;
-          }
-        }
-        const textToShow = final || interim;
-        setTranscript(textToShow);
-
-        if (final.trim()) {
-          try {
-            recognition.stop();
-          } catch {
-            // ignore
-          }
-          setIsListening(false);
-          handleUserQuery(final.trim());
-        }
-      };
-
-      recognition.onerror = (event: any) => {
-        console.warn('Speech recognition error event:', event.error);
+      },
+      onInterimTranscript: (text) => {
+        setTranscript(text);
+      },
+      onFinalTranscript: (finalText) => {
         setIsListening(false);
-        if (event.error === 'not-allowed') {
-          setMicErrorMessage(
-            language === 'kn'
-              ? 'ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ಬ್ರೌಸರ್ ಅಡ್ರೆಸ್ ಬಾರ್‌ನಲ್ಲಿ ಮೈಕ್ ಆನ್ ಮಾಡಿ ಅಥವಾ ಕೆಳಗಿನ ಪ್ರಶ್ನೆಗಳನ್ನು ಒತ್ತಿ.'
-              : 'Microphone permission denied. Allow mic access in address bar or tap quick questions.'
-          );
-        } else if (event.error === 'network') {
-          setMicErrorMessage(
-            language === 'kn'
-              ? 'ನೆಟ್‌ವರ್ಕ್ ಮೈಕ್ರೊಫೋನ್ ಲಭ್ಯವಿಲ್ಲ. ಕೆಳಗಿನ ತ್ವರಿತ ಪ್ರಶ್ನೆಗಳನ್ನು ಆಯ್ಕೆಮಾಡಿ.'
-              : 'Speech recognition network timeout. Please tap one of the quick prompts below.'
-          );
-        } else if (event.error === 'no-speech') {
-          setMicErrorMessage(
-            language === 'kn'
-              ? 'ಧ್ವನಿ ಕೇಳಿಸಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮೈಕ್ ಹತ್ತಿರ ಮಾತನಾಡಿ ಅಥವಾ ಕೆಳಗಿನ ಆಯ್ಕೆಗಳನ್ನು ಒತ್ತಿ.'
-              : 'No voice was detected. Please speak closer to microphone or tap quick prompts.'
-          );
-        }
-      };
-
-      recognition.onend = () => {
+        setTranscript('');
+        void handleUserQuery(finalText);
+      },
+      onError: (errMsg) => {
         setIsListening(false);
-      };
-
-      recognitionRef.current = recognition;
-      recognition.start();
-    } catch (err: any) {
-      console.warn('Error starting speech recognition:', err);
-      setIsListening(false);
-      setMicErrorMessage(
-        language === 'kn'
-          ? 'ಮೈಕ್ರೊಫೋನ್ ಪ್ರಾರಂಭಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ಕೆಳಗಿನ ತ್ವರಿತ ಧ್ವನಿ ಪ್ರಶ್ನೆಗಳನ್ನು ಒತ್ತಿ.'
-          : 'Could not activate microphone. Tap one of the suggested prompts below.'
-      );
-    }
+        setMicErrorMessage(errMsg);
+      },
+      onEnd: () => {
+        setIsListening(false);
+      },
+    });
   };
 
   const handleUserQuery = async (queryText: string) => {
@@ -535,11 +453,9 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
 
               <button
                 onClick={() => {
+                  voiceRecognitionController.stopListening(false);
+                  setIsListening(false);
                   stopAllAudio();
-                  if (isListening && recognitionRef.current) {
-                    recognitionRef.current.stop();
-                    setIsListening(false);
-                  }
                   onClose();
                 }}
                 className="p-2 rounded-full text-[#064e3b70] hover:text-[#064e3b] hover:bg-emerald-100/60 transition-all cursor-pointer"

@@ -1,26 +1,26 @@
 import express from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
+import { createServer as createViteServer, ViteDevServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
-import {
-  calculateRealtimePrediction,
-  getLiveMandiPricesList,
-  DEFAULT_AGMARKNET_CONFIG,
-  CROP_PROFILES,
-  REGIONAL_MANDIS,
-  marketDataRepository,
-  CROP_MASTER_LIST,
-  SUPPORTED_MANDIS,
-  executeCropMarketForecast,
-} from './src/services/mandiPredictionEngine';
-import { aiAgentController } from './src/services/aiAgent/aiAgentController';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+type EngineModules = {
+  mandi: typeof import('./src/services/mandiPredictionEngine');
+  agent: typeof import('./src/services/aiAgent/aiAgentController');
+};
+
+let engineModulesPromise: Promise<EngineModules> | null = null;
+function getEngineModules(): Promise<EngineModules> {
+  if (!engineModulesPromise) {
+    engineModulesPromise = Promise.all([
+      import('./src/services/mandiPredictionEngine'),
+      import('./src/services/aiAgent/aiAgentController'),
+    ]).then(([mandi, agent]) => ({ mandi, agent }));
+  }
+  return engineModulesPromise;
+}
 
 let aiClient: GoogleGenAI | null = null;
 let geminiQuotaBlocked = false;
@@ -93,6 +93,8 @@ async function startServer() {
         context = '',
         sessionId = 'default-session',
       } = req.body;
+
+      const { aiAgentController } = (await getEngineModules()).agent;
 
       if (!message || !message.trim()) {
         const greetingRes = await aiAgentController.processQuery({
@@ -171,7 +173,7 @@ Speak directly to the farmer in 2 to 4 clear, respectful, natural spoken sentenc
       });
     } catch (err: any) {
       console.error('AI Agent Query Error:', err);
-      // Fallback guarantees response is generated through agent controller
+      const { aiAgentController } = (await getEngineModules()).agent;
       const emergencyRes = await aiAgentController.processQuery({
         query: req.body?.message || 'help',
         language: req.body?.language || 'en',
@@ -187,9 +189,80 @@ Speak directly to the farmer in 2 to 4 clear, respectful, natural spoken sentenc
     }
   });
 
+  // 1.02 Server-Side Multilingual Voice Audio Transcription Fallback
+  app.post('/api/gemini/transcribe', async (req, res) => {
+    try {
+      const { audioBase64 = '', mimeType = 'audio/webm', language = 'en' } = req.body || {};
+      const cleanBase64 = String(audioBase64).replace(/^data:audio\/[a-zA-Z0-9.+-]+;base64,/, '').trim();
+
+      if (!cleanBase64 || cleanBase64.length < 100) {
+        return res.status(400).json({ success: false, error: 'empty_audio' });
+      }
+
+      const ai = getGenAI();
+      if (!ai) {
+        return res.status(503).json({ success: false, error: 'transcription_unavailable' });
+      }
+
+      const langMap: Record<string, string> = {
+        en: 'English',
+        kn: 'Kannada (ಕನ್ನಡ)',
+        hi: 'Hindi (हिन्दी)',
+        te: 'Telugu (తెలుగు)',
+        ta: 'Tamil (தமிழ்)',
+        ml: 'Malayalam (മലയാളം)',
+        mr: 'Marathi (मराठी)',
+        bn: 'Bengali (বাংলা)',
+      };
+      const normalizedMime = String(mimeType).split(';')[0].trim() || 'audio/webm';
+      const langLabel = langMap[String(language).toLowerCase()] || 'English';
+
+      const audioPart = {
+        inlineData: {
+          mimeType: normalizedMime,
+          data: cleanBase64,
+        },
+      };
+      const promptText = `Transcribe the spoken agricultural question in this audio accurately.
+Target language hint: ${langLabel}.
+Output ONLY the exact transcribed words in the spoken language script (if no intelligible speech is present or only silence/noise, return an empty string). Do not add commentary or quotes.`;
+
+      const modelsToTry = ['gemini-3.5-transcribe', 'gemini-4-hydrogen'];
+      for (const model of modelsToTry) {
+        try {
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Transcribe timeout')), 8000)
+          );
+          const aiPromise = ai.models.generateContent({
+            model,
+            contents: { parts: [audioPart, { text: promptText }] },
+          });
+          const response = await Promise.race([aiPromise, timeoutPromise]);
+          const transcript = (response.text || '').trim().replace(/^["']|["']$/g, '');
+          return res.json({ success: true, transcript, language });
+        } catch (apiErr: any) {
+          if (
+            apiErr?.status === 403 ||
+            String(apiErr?.message || '').includes('403') ||
+            String(apiErr?.message || '').includes('PERMISSION_DENIED')
+          ) {
+            markGeminiBlocked();
+            break;
+          }
+        }
+      }
+
+      return res.status(502).json({ success: false, error: 'transcription_failed' });
+    } catch (err: any) {
+      console.error('Audio Transcribe Error:', err);
+      return res.status(500).json({ success: false, error: 'transcription_error' });
+    }
+  });
+
   // 1.05 Dedicated Direct AI Agent Execution Endpoint
   app.post('/api/ai/agent/execute', async (req, res) => {
     try {
+      const { aiAgentController } = (await getEngineModules()).agent;
       const { query = '', language = 'en', role = 'farmer', sessionId = 'default-session', context = '' } = req.body;
       const result = await aiAgentController.processQuery({
         query,
@@ -205,7 +278,8 @@ Speak directly to the farmer in 2 to 4 clear, respectful, natural spoken sentenc
   });
 
   // 1.06 Conversation Session Reset Endpoint
-  app.post('/api/ai/conversation/reset', (req, res) => {
+  app.post('/api/ai/conversation/reset', async (req, res) => {
+    const { aiAgentController } = (await getEngineModules()).agent;
     const { sessionId = 'default-session' } = req.body;
     aiAgentController.resetSession(sessionId);
     return res.json({ status: 'ok', message: 'Conversation session context reset', sessionId });
@@ -262,11 +336,13 @@ Speak directly to the farmer in 2 to 4 clear, respectful, natural spoken sentenc
 
       const targetChunks = (chunks.length > 0 ? chunks : [cleanText.slice(0, 180)]).slice(0, 12);
 
-      const audioBuffers: Buffer[] = [];
-      for (const c of targetChunks) {
-        const clients = ['tw-ob', 'gtx'];
-        for (const client of clients) {
-          const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(c)}&tl=${encodeURIComponent(lang)}&client=${client}`;
+      const fetchChunk = async (c: string): Promise<Buffer | null> => {
+        const candidates = [
+          `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(c)}&tl=${encodeURIComponent(lang)}&client=tw-ob`,
+          `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(c)}&tl=${encodeURIComponent(lang)}&client=gtx`,
+          `https://clients5.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(c)}&tl=${encodeURIComponent(lang)}&client=dict-chrome-ex`,
+        ];
+        for (const ttsUrl of candidates) {
           try {
             const upstream = await fetch(ttsUrl, {
               headers: {
@@ -280,16 +356,19 @@ Speak directly to the farmer in 2 to 4 clear, respectful, natural spoken sentenc
               if (contentType.includes('audio') || contentType.includes('octet-stream')) {
                 const arr = await upstream.arrayBuffer();
                 if (arr.byteLength > 64) {
-                  audioBuffers.push(Buffer.from(arr));
-                  break;
+                  return Buffer.from(arr);
                 }
               }
             }
           } catch {
-            // continue with next client
+            // continue with next candidate
           }
         }
-      }
+        return null;
+      };
+
+      const results = await Promise.all(targetChunks.map((c) => fetchChunk(c)));
+      const audioBuffers = results.filter((b): b is Buffer => Boolean(b));
 
       if (audioBuffers.length === 0) {
         return res.status(502).send('Unable to generate audio from upstream TTS');
@@ -306,8 +385,9 @@ Speak directly to the farmer in 2 to 4 clear, respectful, natural spoken sentenc
   });
 
   // 2. Real-Time Mandi Prices Endpoint (APMC & Agmarknet Feeds)
-  app.get('/api/mandi/prices', (req, res) => {
+  app.get('/api/mandi/prices', async (req, res) => {
     try {
+      const { getLiveMandiPricesList } = (await getEngineModules()).mandi;
       const prices = getLiveMandiPricesList();
       return res.json({
         success: true,
@@ -323,7 +403,8 @@ Speak directly to the farmer in 2 to 4 clear, respectful, natural spoken sentenc
   });
 
   // 2.1 Regional Mandis and Available Crops Directory
-  app.get('/api/mandi/meta', (req, res) => {
+  app.get('/api/mandi/meta', async (req, res) => {
+    const { CROP_PROFILES, REGIONAL_MANDIS, DEFAULT_AGMARKNET_CONFIG } = (await getEngineModules()).mandi;
     return res.json({
       crops: Object.keys(CROP_PROFILES),
       mandis: REGIONAL_MANDIS,
@@ -343,6 +424,7 @@ Speak directly to the farmer in 2 to 4 clear, respectful, natural spoken sentenc
   // 2.2 Multi-Day Real-Time Mandi AI Prediction Endpoint
   const handlePricePrediction = async (req: express.Request, res: express.Response) => {
     try {
+      const { calculateRealtimePrediction } = (await getEngineModules()).mandi;
       const {
         crop = 'Tomato',
         mandi = 'Kolar APMC Market',
@@ -453,7 +535,8 @@ Write all text directly in the target language (${language === 'kn' ? 'Kannada /
     }
   });
 
-  app.get('/api/agmarknet/status', (req, res) => {
+  app.get('/api/agmarknet/status', async (req, res) => {
+    const { DEFAULT_AGMARKNET_CONFIG } = (await getEngineModules()).mandi;
     return res.json({
       success: true,
       config: DEFAULT_AGMARKNET_CONFIG,
@@ -463,8 +546,9 @@ Write all text directly in the target language (${language === 'kn' ? 'Kannada /
   // 2.4 Dedicated Agricultural Market & ML Prediction API Endpoints
 
   // GET /api/market/latest - Query latest modal prices across crops and mandis
-  app.get('/api/market/latest', (req, res) => {
+  app.get('/api/market/latest', async (req, res) => {
     try {
+      const { marketDataRepository, getLiveMandiPricesList } = (await getEngineModules()).mandi;
       const { crop, mandi } = req.query as { crop?: string; mandi?: string };
       if (crop) {
         const record = marketDataRepository.getLatestRecord(crop, mandi);
@@ -488,8 +572,9 @@ Write all text directly in the target language (${language === 'kn' ? 'Kannada /
   });
 
   // GET /api/market/history - Query daily historical time-series
-  app.get('/api/market/history', (req, res) => {
+  app.get('/api/market/history', async (req, res) => {
     try {
+      const { marketDataRepository } = (await getEngineModules()).mandi;
       const crop = (req.query.crop as string) || 'Tomato';
       const mandi = req.query.mandi as string | undefined;
       const days = parseInt(req.query.days as string, 10) || 30;
@@ -510,7 +595,8 @@ Write all text directly in the target language (${language === 'kn' ? 'Kannada /
   });
 
   // GET /api/predictions/crops - List all supported crop definitions
-  app.get('/api/predictions/crops', (req, res) => {
+  app.get('/api/predictions/crops', async (req, res) => {
+    const { CROP_MASTER_LIST, SUPPORTED_MANDIS } = (await getEngineModules()).mandi;
     return res.json({
       success: true,
       count: CROP_MASTER_LIST.length,
@@ -535,7 +621,8 @@ Write all text directly in the target language (${language === 'kn' ? 'Kannada /
   });
 
   // GET /api/predictions/crop/:cropId - Individual crop master details
-  app.get('/api/predictions/crop/:cropId', (req, res) => {
+  app.get('/api/predictions/crop/:cropId', async (req, res) => {
+    const { CROP_MASTER_LIST, marketDataRepository } = (await getEngineModules()).mandi;
     const { cropId } = req.params;
     const crop = CROP_MASTER_LIST.find(
       (c) => c.id.toLowerCase() === cropId.toLowerCase() || c.name.toLowerCase() === cropId.toLowerCase()
@@ -555,8 +642,9 @@ Write all text directly in the target language (${language === 'kn' ? 'Kannada /
   });
 
   // GET /api/predictions/forecast - Multi-horizon forecasting endpoint
-  app.get('/api/predictions/forecast', (req, res) => {
+  app.get('/api/predictions/forecast', async (req, res) => {
     try {
+      const { CROP_MASTER_LIST, executeCropMarketForecast } = (await getEngineModules()).mandi;
       const {
         crop = 'Tomato',
         cropId,
@@ -601,8 +689,9 @@ Write all text directly in the target language (${language === 'kn' ? 'Kannada /
   });
 
   // GET /api/predictions/compare-mandis - Inter-mandi spatial comparison
-  app.get('/api/predictions/compare-mandis', (req, res) => {
+  app.get('/api/predictions/compare-mandis', async (req, res) => {
     try {
+      const { marketDataRepository } = (await getEngineModules()).mandi;
       const crop = (req.query.crop as string) || 'Tomato';
       const comparison = marketDataRepository.getCrossMandiComparison(crop);
       return res.json({
@@ -617,8 +706,9 @@ Write all text directly in the target language (${language === 'kn' ? 'Kannada /
   });
 
   // GET /api/predictions/analytics - Volatility, volume elasticity, macro metrics
-  app.get('/api/predictions/analytics', (req, res) => {
+  app.get('/api/predictions/analytics', async (req, res) => {
     try {
+      const { CROP_MASTER_LIST, marketDataRepository } = (await getEngineModules()).mandi;
       const analytics = CROP_MASTER_LIST.map((crop) => {
         const latest = marketDataRepository.getLatestRecord(crop.name, crop.benchmarkMandi);
         const history30 = marketDataRepository.getHistory(crop.name, crop.benchmarkMandi, 30);
@@ -654,8 +744,9 @@ Write all text directly in the target language (${language === 'kn' ? 'Kannada /
   });
 
   // GET /api/predictions/model-performance - Chronological backtesting evaluation
-  app.get('/api/predictions/model-performance', (req, res) => {
+  app.get('/api/predictions/model-performance', async (req, res) => {
     try {
+      const { executeCropMarketForecast } = (await getEngineModules()).mandi;
       const crop = (req.query.crop as string) || 'Tomato';
       const mandi = (req.query.mandi as string) || 'Kolar APMC Market';
       const forecast = executeCropMarketForecast({ crop, mandi, horizonDays: 7 });
@@ -673,8 +764,9 @@ Write all text directly in the target language (${language === 'kn' ? 'Kannada /
   });
 
   // POST /api/predictions/recalculate - Recalculate with dynamic parameters
-  app.post('/api/predictions/recalculate', (req, res) => {
+  app.post('/api/predictions/recalculate', async (req, res) => {
     try {
+      const { executeCropMarketForecast } = (await getEngineModules()).mandi;
       const {
         crop = 'Tomato',
         mandi = 'Kolar APMC Market',
@@ -708,8 +800,9 @@ Write all text directly in the target language (${language === 'kn' ? 'Kannada /
   });
 
   // POST /api/market/record - Ingest verified market price record (triggers dynamic recalculation)
-  app.post('/api/market/record', (req, res) => {
+  app.post('/api/market/record', async (req, res) => {
     try {
+      const { marketDataRepository, executeCropMarketForecast } = (await getEngineModules()).mandi;
       const {
         commodity,
         variety = 'Standard Commercial Grade',
@@ -914,13 +1007,26 @@ Return JSON strictly:
     }
   });
 
-  // Vite middleware for development vs static build for production
+  let viteServer: ViteDevServer | null = null;
+
+  // Bind HTTP port FIRST so startup health probes succeed immediately while Vite/data engine warm up
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true, hmr: false },
+    const viteReadyPromise = createViteServer({
+      server: { middlewareMode: true, hmr: false, ws: false },
       appType: 'spa',
+    }).then((vite) => {
+      viteServer = vite;
+      return vite;
     });
-    app.use(vite.middlewares);
+
+    app.use(async (req, res, next) => {
+      try {
+        const vite = await viteReadyPromise;
+        vite.middlewares(req, res, next);
+      } catch (err) {
+        next(err);
+      }
+    });
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
@@ -931,22 +1037,44 @@ Return JSON strictly:
 
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌾 AGRITECH Server running on http://0.0.0.0:${PORT}`);
+    // Pre-warm prediction & AI agent modules asynchronously right after port binds
+    void getEngineModules().catch((err) => {
+      console.error('Engine module pre-warm error:', err);
+    });
   });
 
+  let bindRetries = 0;
   server.on('error', (err: any) => {
-    if (err.code === 'EADDRINUSE') {
-      console.warn(`Port ${PORT} in use, retrying in 1.5s...`);
+    if (err.code === 'EADDRINUSE' && bindRetries < 5) {
+      bindRetries += 1;
+      console.warn(`Port ${PORT} in use, retrying (${bindRetries}/5) in 1s...`);
       setTimeout(() => {
-        server.close();
         server.listen(PORT, '0.0.0.0');
-      }, 1500);
+      }, 1000);
     } else {
       console.error('Server error:', err);
+      process.exit(1);
     }
   });
 
+  let isShuttingDown = false;
   const cleanup = () => {
-    server.close(() => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+
+    const forceExitTimer = setTimeout(() => {
+      process.exit(0);
+    }, 350);
+    forceExitTimer.unref();
+
+    Promise.allSettled([
+      viteServer ? viteServer.close() : Promise.resolve(),
+      new Promise<void>((resolve) => {
+        server.closeAllConnections?.();
+        server.close(() => resolve());
+      }),
+    ]).finally(() => {
+      clearTimeout(forceExitTimer);
       process.exit(0);
     });
   };
@@ -954,4 +1082,7 @@ Return JSON strictly:
   process.on('SIGINT', cleanup);
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error('Fatal server startup error:', err);
+  process.exit(1);
+});
