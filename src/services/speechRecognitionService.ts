@@ -1,6 +1,6 @@
 // Unified Multilingual Speech-to-Text Service for AGRITECH
 // Synchronous Web Speech launch, gesture-unlocked shared AudioContext,
-// Intel SST / Windows raw-audio AEC fallback, and accurate diagnostics.
+// race-free raw Intel SST / stereo fallback, and live mic telemetry.
 
 import { LanguageCode } from '../types';
 import { LanguageInfo } from '../i18n/languageConfig';
@@ -14,12 +14,22 @@ export interface MicDeviceInfo {
 
 export interface MicDiagnosticResult {
   ok: boolean;
-  reason: 'ok' | 'permission_denied' | 'no_device' | 'busy' | 'silent_device' | 'unsupported' | 'context_suspended';
+  reason:
+    | 'ok'
+    | 'permission_denied'
+    | 'no_device'
+    | 'busy'
+    | 'hardware_muted'
+    | 'silent_device'
+    | 'unsupported'
+    | 'context_suspended';
   peakLevel: number;
+  trackMuted: boolean;
   activeDeviceLabel: string;
   devices: MicDeviceInfo[];
   workingDeviceId?: string;
   workingDeviceLabel?: string;
+  lastSpeechError?: string;
 }
 
 export interface SpeechListenOptions {
@@ -39,6 +49,7 @@ type MicMsgKey =
   | 'permission_denied'
   | 'no_mic_hardware'
   | 'mic_busy'
+  | 'hardware_muted'
   | 'no_voice'
   | 'not_supported'
   | 'network_fallback_failed'
@@ -50,7 +61,7 @@ const LOCALIZED_MIC_MESSAGES: Record<MicMsgKey, Record<LanguageCode, string>> = 
     en: 'Microphone permission was denied. Click the lock/mic icon in your browser address bar and allow microphone access.',
     kn: 'ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ಬ್ರೌಸರ್ ಅಡ್ರೆಸ್ ಬಾರ್‌ನಲ್ಲಿ ಮೈಕ್ ಅನುಮತಿಸಿ.',
     hi: 'माइक्रोफ़ोन अनुमति अस्वीकृत है। ब्राउज़र एड्रेस बार में माइक की अनुमति दें।',
-    te: 'మైక్రోఫోన్ అనుమతి నిరాకరించబడింది. బ్రౌజర్ అడ్రెస్ బార్‌లో మైక్ అనుమతించండి.',
+    te: 'మైక్రోఫోన్ అనుమతి నిరాకరించబడింది. బ్రౌజర్ అడ್ರెస్ బార్‌లో మైక్ అనుమతించండి.',
     ta: 'மைக்ரோஃபோன் அனுமதி மறுக்கப்பட்டது. உலாவி முகவரிப் பட்டியில் மைக்கை அனுமதிக்கவும்.',
     ml: 'മൈക്രോഫോൺ അനുമതി നിരസിച്ചു. ബ്രൗസർ അഡ്രസ് ബാറിൽ മൈക്ക് അനുവദിക്കുക.',
     mr: 'मायक्रोफोन परवानगी नाकारली आहे. ब्राउझर ॲड्रेस बारमध्ये माइकला परवानगी द्या.',
@@ -76,6 +87,16 @@ const LOCALIZED_MIC_MESSAGES: Record<MicMsgKey, Record<LanguageCode, string>> = 
     mr: 'तुमचा मायक्रोफोन दुसऱ्या ॲपमध्ये वापरला जात आहे. इतर ॲप बंद करून पुन्हा प्रयत्न करा.',
     bn: 'আপনার মাইক্রোফোন অন্য অ্যাপে ব্যবহৃত হচ্ছে। সেটি বন্ধ করে আবার চেষ্টা করুন।',
   },
+  hardware_muted: {
+    en: 'Your microphone track is muted by your OS or laptop hardware mic-mute key. Unmute your mic (or check Windows Sound -> Input volume) and retry.',
+    kn: 'ನಿಮ್ಮ ಸಾಧನ ಅಥವಾ ಕೀಬೋರ್ಡ್‌ನಿಂದ ಮೈಕ್ ಮ್ಯೂಟ್ ಆಗಿದೆ. ದಯವಿಟ್ಟು ಅನ್‌ಮ್ಯೂಟ್ ಮಾಡಿ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.',
+    hi: 'आपका माइक सिस्टम या कीबोर्ड से म्यूट है। कृपया अनम्यूट करें और फिर से प्रयास करें।',
+    te: 'మీ మైక్రోఫోన్ సిస్టమ్ లేదా కీబోర్డ్ ద్వారా మ్యూట్ చేయబడింది. అన్‌మ్యూట్ చేసి మళ్లీ ప్రయత్నించండి.',
+    ta: 'உங்கள் மைக்ரோஃபோன் கணினி அல்லது கீபோர்டால் முடக்கப்பட்டுள்ளது. அன்மியூட் செய்து மீண்டும் முயற்சிக்கவும்.',
+    ml: 'നിങ്ങളുടെ മൈക്രോഫോൺ സിസ്റ്റത്തിൽ മ്യൂട്ട് ചെയ്തിരിക്കുന്നു. അൺമ്യൂട്ട് ചെയ്ത് വീണ്ടും ശ്രമിക്കുക.',
+    mr: 'तुमचा माइक सिस्टीम किंवा कीबोर्डवरून म्यूट आहे. कृपया अनम्यूट करून पुन्हा प्रयत्न करा.',
+    bn: 'আপনার মাইক্রোফোন সিস্টেম বা কীবোর্ড থেকে মিউট করা আছে। আনমিউট করে আবার চেষ্টা করুন।',
+  },
   no_voice: {
     en: 'No audio signal reached the microphone. Check your browser/OS mic privacy & input level, or tap a quick prompt below.',
     kn: 'ಮೈಕ್ರೊಫೋನ್‌ಗೆ ಧ್ವನಿ ತಲುಪಲಿಲ್ಲ. ಬ್ರೌಸರ್/ಸಾಧನದ ಮೈಕ್ ಸೆಟ್ಟಿಂಗ್ಸ್ ಪರಿಶೀಲಿಸಿ ಅಥವಾ ಕೆಳಗಿನ ಪ್ರಶ್ನೆಗಳನ್ನು ಒತ್ತಿ.',
@@ -94,7 +115,7 @@ const LOCALIZED_MIC_MESSAGES: Record<MicMsgKey, Record<LanguageCode, string>> = 
     ta: 'இந்த உலாவியில் குரல் உள்ளீடு இல்லை. தயவுசெய்து தட்டச்சு செய்யவும் அல்லது கீழே உள்ள கேள்விகளைத் தட்டவும்.',
     ml: 'ഈ ബ്രൗസറിൽ വോയിസ് ഇൻപുട്ട് ലഭ്യമല്ല. ദയവായി ടൈപ്പ് ചെയ്യുക അല്ലെങ്കിൽ താഴെയുള്ള ചോദ്യങ്ങൾ തിരഞ്ഞെടുക്കുക.',
     mr: 'या ब्राउझरमध्ये व्हॉईस इनपुट उपलब्ध नाही. कृपया टाइप करा किंवा खालील प्रश्न निवडा.',
-    bn: 'এই ব্রাউজারে ভয়েস ইনपुট উপলব্ধ নয়। অনুগ্রহ করে টাইপ করুন অথবা নিচের প্রশ্ন চাপুন।',
+    bn: 'এই ব্রাউজারে ভয়েস ইনপট উপলব্ধ নয়। অনুগ্রহ করে টাইপ করুন অথবা নিচের প্রশ্ন চাপুন।',
   },
   network_fallback_failed: {
     en: 'Could not transcribe voice right now. Please tap the mic and speak clearly again, or tap a quick prompt below.',
@@ -107,7 +128,7 @@ const LOCALIZED_MIC_MESSAGES: Record<MicMsgKey, Record<LanguageCode, string>> = 
     bn: 'ভয়েস টেক্সটে রূপান্তর করা যায়নি। অনুগ্রহ করে আবার বলুন অথবা নিচের প্রশ্ন চাপুন।',
   },
   transcription_unavailable: {
-    en: 'Microphone audio was captured, but browser speech recognition could not connect or match words. Use Google Chrome (non-incognito) or tap a quick prompt below.',
+    en: 'Microphone audio was captured, but browser speech recognition could not connect or match words. Try Google Chrome (non-incognito) or tap a quick prompt below.',
     kn: 'ಮೈಕ್ ಧ್ವನಿಯನ್ನು ಗ್ರಹಿಸಿದೆ, ಆದರೆ ಬ್ರೌಸರ್ ಧ್ವನಿ ಗುರುತಿಸುವಿಕೆ ಸಂಪರ್ಕಗೊಳ್ಳಲಿಲ್ಲ. ದಯವಿಟ್ಟು Google Chrome ಬಳಸಿ ಅಥವಾ ಕೆಳಗಿನ ಪ್ರಶ್ನೆಗಳನ್ನು ಒತ್ತಿ.',
     hi: 'माइक ने आवाज़ सुनी, लेकिन ब्राउज़र स्पीच सेवा शब्दों को पहचान नहीं सकी। Google Chrome का उपयोग करें या नीचे दिए गए प्रश्न चुनें।',
     te: 'మైక్ శబ్దాన్ని గుర్తించింది, కానీ బ్రౌజర్ స్పీచ్ సర్వీస్ పదాలను గుర్తించలేకపోయింది. Google Chrome ఉపయోగించండి లేదా దిగువ ప్రశ్నలను నొక్కండి.',
@@ -159,7 +180,12 @@ function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-async function openAudioStream(preferredDeviceId?: string, rawMode = false): Promise<MediaStream> {
+type StreamOpenStrategy = 'raw_mono' | 'raw_stereo' | 'browser_default';
+
+async function openAudioStreamWithStrategy(
+  preferredDeviceId: string | undefined,
+  strategy: StreamOpenStrategy
+): Promise<MediaStream> {
   if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
     throw new Error('getUserMedia_unsupported');
   }
@@ -169,30 +195,51 @@ async function openAudioStream(preferredDeviceId?: string, rawMode = false): Pro
       ? { deviceId: { exact: preferredDeviceId } }
       : {};
 
-  const attempts: MediaStreamConstraints[] = rawMode
-    ? [
-        {
-          audio: {
-            ...deviceConstraint,
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false,
+  const attempts: MediaStreamConstraints[] =
+    strategy === 'raw_stereo'
+      ? [
+          {
+            audio: {
+              ...deviceConstraint,
+              channelCount: { ideal: 2 },
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+            },
           },
-        },
-        { audio: Object.keys(deviceConstraint).length ? deviceConstraint : true },
-      ]
-    : [
-        // Try standard constraint first, then raw bypass (fixes Windows Intel Smart Sound Technology APO double-AEC silence)
-        { audio: Object.keys(deviceConstraint).length ? deviceConstraint : true },
-        {
-          audio: {
-            ...deviceConstraint,
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false,
+          {
+            audio: {
+              ...deviceConstraint,
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+            },
           },
-        },
-      ];
+          { audio: Object.keys(deviceConstraint).length ? deviceConstraint : true },
+        ]
+      : strategy === 'raw_mono'
+      ? [
+          {
+            audio: {
+              ...deviceConstraint,
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+            },
+          },
+          { audio: Object.keys(deviceConstraint).length ? deviceConstraint : true },
+        ]
+      : [
+          { audio: Object.keys(deviceConstraint).length ? deviceConstraint : true },
+          {
+            audio: {
+              ...deviceConstraint,
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+            },
+          },
+        ];
 
   let lastErr: any = null;
   for (const constraints of attempts) {
@@ -260,7 +307,6 @@ class MultilingualSpeechRecognitionController {
     return this.activeListening;
   }
 
-  // Must be called synchronously inside a user click gesture so the browser never leaves AudioContext suspended
   private ensureSharedAudioContextSync(): AudioContext | null {
     if (typeof window === 'undefined') return null;
     const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
@@ -335,11 +381,14 @@ class MultilingualSpeechRecognitionController {
 
   private async sampleStreamRms(
     stream: MediaStream,
-    sampleMs: number
-  ): Promise<{ peakRms: number; verifiedRunning: boolean }> {
+    sampleMs: number,
+    onLiveLevel?: (level: number) => void
+  ): Promise<{ peakRms: number; verifiedRunning: boolean; trackMuted: boolean }> {
+    const track = stream.getAudioTracks()[0];
+    const trackMuted = Boolean(track?.muted);
     const graph = this.attachAnalyserToSharedContext(stream);
     if (!graph) {
-      return { peakRms: 0, verifiedRunning: false };
+      return { peakRms: 0, verifiedRunning: false, trackMuted };
     }
 
     if (graph.audioCtx.state === 'suspended') {
@@ -362,6 +411,7 @@ class MultilingualSpeechRecognitionController {
           const rms = Math.sqrt(sumSq / graph.dataArray.length);
           if (rms > peakRms) peakRms = rms;
           runningFrames += 1;
+          onLiveLevel?.(Math.min(1, rms * 18));
         }
         if (Date.now() - started >= sampleMs) {
           clearInterval(timer);
@@ -376,36 +426,15 @@ class MultilingualSpeechRecognitionController {
       (graph.audioCtx.currentTime > initialTime || peakRms > 0);
 
     this.detachAnalyserNodes();
-    return { peakRms, verifiedRunning };
+    onLiveLevel?.(0);
+    return { peakRms, verifiedRunning, trackMuted: Boolean(track?.muted) };
   }
 
-  // Opens stream; if default processed stream outputs pure zeros on Intel SST / Windows DSP,
-  // automatically re-opens with echoCancellation: false, noiseSuppression: false, autoGainControl: false.
-  private async openHealthyStream(
+  public async testMicrophone(
     preferredDeviceId?: string,
-    preferRawFirst = false
-  ): Promise<{ stream: MediaStream; trackLabel: string; usedRawMode: boolean }> {
-    let stream = await openAudioStream(preferredDeviceId, preferRawFirst);
-    let track = stream.getAudioTracks()[0];
-    let trackLabel = track?.label || 'Default Microphone';
-
-    // Quick 450ms check on Intel SST / Windows drivers to catch WebRTC double-AEC zeroing bug
-    if (!preferRawFirst && /intel|smart sound|realtek|array/i.test(trackLabel)) {
-      const probe = await this.sampleStreamRms(stream, 450);
-      if (probe.verifiedRunning && probe.peakRms < 0.00005) {
-        stream.getTracks().forEach((t) => t.stop());
-        stream = await openAudioStream(preferredDeviceId, true);
-        track = stream.getAudioTracks()[0];
-        trackLabel = track?.label || trackLabel;
-        return { stream, trackLabel, usedRawMode: true };
-      }
-    }
-
-    return { stream, trackLabel, usedRawMode: preferRawFirst };
-  }
-
-  public async testMicrophone(preferredDeviceId?: string, sampleMs = 1100): Promise<MicDiagnosticResult> {
-    // Unlock AudioContext synchronously in the click gesture!
+    sampleMs = 1500,
+    onLiveLevel?: (level: number) => void
+  ): Promise<MicDiagnosticResult> {
     this.ensureSharedAudioContextSync();
 
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
@@ -413,67 +442,98 @@ class MultilingualSpeechRecognitionController {
         ok: false,
         reason: 'unsupported',
         peakLevel: 0,
+        trackMuted: false,
         activeDeviceLabel: '',
         devices: [],
+        lastSpeechError: this.lastWebSpeechError || undefined,
       };
     }
 
     let stream: MediaStream | null = null;
     try {
-      const opened = await this.openHealthyStream(preferredDeviceId, false);
-      stream = opened.stream;
-      const activeLabel = opened.trackLabel;
+      // Open cleanly in raw_mono directly so Intel SST hardware APO doesn't collide with WebRTC AEC
+      stream = await openAudioStreamWithStrategy(preferredDeviceId, 'raw_mono');
+      const track = stream.getAudioTracks()[0];
+      const activeLabel = track?.label || 'Default Microphone';
       const devices = await listAudioInputDevices();
 
-      const sample = await this.sampleStreamRms(stream, sampleMs);
+      const firstSample = await this.sampleStreamRms(stream, sampleMs, onLiveLevel);
       stream.getTracks().forEach((t) => t.stop());
       stream = null;
 
-      const normalizedLevel = Math.min(1, sample.peakRms * 18);
-      if (!sample.verifiedRunning) {
+      if (!firstSample.verifiedRunning) {
         return {
           ok: false,
           reason: 'context_suspended',
-          peakLevel: normalizedLevel,
+          peakLevel: Math.min(1, firstSample.peakRms * 18),
+          trackMuted: firstSample.trackMuted,
           activeDeviceLabel: activeLabel,
           devices,
+          lastSpeechError: this.lastWebSpeechError || undefined,
         };
       }
 
-      if (sample.peakRms >= 0.0004) {
+      if (firstSample.peakRms >= 0.00035) {
         return {
           ok: true,
           reason: 'ok',
-          peakLevel: normalizedLevel,
+          peakLevel: Math.min(1, firstSample.peakRms * 18),
+          trackMuted: firstSample.trackMuted,
           activeDeviceLabel: activeLabel,
           devices,
+          lastSpeechError: this.lastWebSpeechError || undefined,
         };
       }
 
-      // Check alternate hardware microphones
+      // If raw_mono measured zero, wait 300ms for WASAPI release and try raw_stereo (2ch Intel SST array)
+      await new Promise((r) => setTimeout(r, 300));
+      let stereoSample = { peakRms: 0, verifiedRunning: false, trackMuted: firstSample.trackMuted };
+      try {
+        const stereoStream = await openAudioStreamWithStrategy(preferredDeviceId, 'raw_stereo');
+        stereoSample = await this.sampleStreamRms(stereoStream, 850, onLiveLevel);
+        stereoStream.getTracks().forEach((t) => t.stop());
+        if (stereoSample.verifiedRunning && stereoSample.peakRms >= 0.00035) {
+          return {
+            ok: true,
+            reason: 'ok',
+            peakLevel: Math.min(1, stereoSample.peakRms * 18),
+            trackMuted: stereoSample.trackMuted,
+            activeDeviceLabel: activeLabel,
+            devices,
+            lastSpeechError: this.lastWebSpeechError || undefined,
+          };
+        }
+      } catch {
+        // ignore stereo probe error
+      }
+
+      // Scan alternate microphones in enumerateDevices()
       const alternates = devices.filter(
         (d) =>
           d.deviceId &&
           d.deviceId !== 'default' &&
           d.deviceId !== 'communications' &&
-          d.label !== activeLabel &&
+          d.deviceId !== preferredDeviceId &&
           !/virtual|stereo mix|cable output/i.test(d.label)
       );
 
-      for (const alt of alternates.slice(0, 3)) {
+      for (const alt of alternates.slice(0, 4)) {
         try {
-          const altStream = await openAudioStream(alt.deviceId, true);
-          const altSample = await this.sampleStreamRms(altStream, 650);
+          await new Promise((r) => setTimeout(r, 250));
+          const altStream = await openAudioStreamWithStrategy(alt.deviceId, 'raw_stereo');
+          const altSample = await this.sampleStreamRms(altStream, 700, onLiveLevel);
           altStream.getTracks().forEach((tr) => tr.stop());
-          if (altSample.verifiedRunning && altSample.peakRms >= 0.0006) {
+          if (altSample.verifiedRunning && altSample.peakRms >= 0.0004) {
             return {
               ok: false,
               reason: 'silent_device',
-              peakLevel: normalizedLevel,
+              peakLevel: Math.min(1, Math.max(firstSample.peakRms, stereoSample.peakRms) * 18),
+              trackMuted: firstSample.trackMuted || stereoSample.trackMuted,
               activeDeviceLabel: activeLabel,
               devices,
               workingDeviceId: alt.deviceId,
               workingDeviceLabel: alt.label,
+              lastSpeechError: this.lastWebSpeechError || undefined,
             };
           }
         } catch {
@@ -481,12 +541,15 @@ class MultilingualSpeechRecognitionController {
         }
       }
 
+      const anyMuted = firstSample.trackMuted || stereoSample.trackMuted;
       return {
         ok: false,
-        reason: 'silent_device',
-        peakLevel: normalizedLevel,
+        reason: anyMuted ? 'hardware_muted' : 'silent_device',
+        peakLevel: Math.min(1, Math.max(firstSample.peakRms, stereoSample.peakRms) * 18),
+        trackMuted: anyMuted,
         activeDeviceLabel: activeLabel,
         devices,
+        lastSpeechError: this.lastWebSpeechError || undefined,
       };
     } catch (err: any) {
       if (stream) {
@@ -498,8 +561,10 @@ class MultilingualSpeechRecognitionController {
           ok: false,
           reason: 'permission_denied',
           peakLevel: 0,
+          trackMuted: false,
           activeDeviceLabel: '',
           devices,
+          lastSpeechError: this.lastWebSpeechError || undefined,
         };
       }
       if (err?.name === 'NotFoundError' || err?.name === 'DevicesNotFoundError') {
@@ -507,16 +572,20 @@ class MultilingualSpeechRecognitionController {
           ok: false,
           reason: 'no_device',
           peakLevel: 0,
+          trackMuted: false,
           activeDeviceLabel: '',
           devices,
+          lastSpeechError: this.lastWebSpeechError || undefined,
         };
       }
       return {
         ok: false,
         reason: 'busy',
         peakLevel: 0,
+        trackMuted: false,
         activeDeviceLabel: '',
         devices,
+        lastSpeechError: this.lastWebSpeechError || undefined,
       };
     }
   }
@@ -524,7 +593,6 @@ class MultilingualSpeechRecognitionController {
   public startListening(options: SpeechListenOptions): void {
     this.stopListening(false);
 
-    // Synchronously unlock shared AudioContext inside user gesture so fallback analyser never stays suspended
     this.ensureSharedAudioContextSync();
 
     this.sessionId += 1;
@@ -691,8 +759,6 @@ class MultilingualSpeechRecognitionController {
 
     try {
       const recognition = new SpeechRecognitionCtor();
-      // Attempt 0: single-shot (most compatible across iframes, Windows Intel SST, Android, Safari).
-      // Retry 1: continuous mode on desktop to give extra time if user paused before speaking.
       const isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent || '');
       recognition.continuous = retryCount > 0 && !isAndroid;
       recognition.interimResults = true;
@@ -815,14 +881,14 @@ class MultilingualSpeechRecognitionController {
                   if (mySessionId === this.sessionId && !this.aborted && !this.submitted) {
                     this.startWebSpeech(SpeechRecognitionCtor, options, mySessionId, retryCount);
                   }
-                }, 220);
+                }, 250);
               })
               .catch((err: any) => {
                 if (mySessionId !== this.sessionId || this.aborted) return;
                 if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {
                   this.finishWithError(options, getMicMsg('permission_denied', options.langConfig.code));
                 } else {
-                  void this.startMediaRecorderFallback(options, mySessionId, startedNotified, sawSoundInAttempt);
+                  void this.handleWebSpeechNoInput(options, mySessionId, startedNotified, sawSoundInAttempt);
                 }
               });
             return;
@@ -846,7 +912,6 @@ class MultilingualSpeechRecognitionController {
           return;
         }
 
-        // On initial `no-speech` (especially if single-shot ended early or en-IN had trouble), retry once in continuous mode
         if (errType === 'no-speech' && retryCount === 0 && (!sawAudioStart || elapsedMs < 3500)) {
           const nextLang =
             options.langConfig.code === 'en' && recognition.lang === 'en-IN' ? 'en-US' : overrideLang;
@@ -854,12 +919,12 @@ class MultilingualSpeechRecognitionController {
             if (mySessionId === this.sessionId && !this.aborted && !this.submitted) {
               this.startWebSpeech(SpeechRecognitionCtor, options, mySessionId, retryCount + 1, nextLang);
             }
-          }, 220);
+          }, 250);
           return;
         }
 
         if (errType === 'network' || errType === 'language-not-supported') {
-          void this.startMediaRecorderFallback(options, mySessionId, startedNotified, sawSoundInAttempt);
+          void this.handleWebSpeechNoInput(options, mySessionId, startedNotified, sawSoundInAttempt);
           return;
         }
 
@@ -901,7 +966,7 @@ class MultilingualSpeechRecognitionController {
             if (mySessionId === this.sessionId && !this.aborted && !this.submitted) {
               this.startWebSpeech(SpeechRecognitionCtor, options, mySessionId, retryCount + 1, overrideLang);
             }
-          }, 220);
+          }, 250);
           return;
         }
 
@@ -924,12 +989,12 @@ class MultilingualSpeechRecognitionController {
   ): Promise<void> {
     if (mySessionId !== this.sessionId || this.aborted || this.submitted) return;
 
-    // Wait briefly (250ms) so Windows WASAPI / Intel SST finishes releasing Web Speech's capture handle
-    await new Promise((r) => setTimeout(r, 250));
+    // Wait 320ms so Windows Intel SST / WASAPI fully releases the Web Speech audio handle
+    await new Promise((r) => setTimeout(r, 320));
     if (mySessionId !== this.sessionId || this.aborted || this.submitted) return;
 
     if (Date.now() < this.cloudTranscribeBlockedUntil) {
-      const diag = await this.testMicrophone(options.preferredDeviceId, 850);
+      const diag = await this.testMicrophone(options.preferredDeviceId, 950, options.onAudioLevel);
       if (mySessionId !== this.sessionId || this.aborted || this.submitted) return;
 
       if (diag.reason === 'permission_denied') {
@@ -944,18 +1009,30 @@ class MultilingualSpeechRecognitionController {
         this.finishWithError(options, getMicMsg('mic_busy', options.langConfig.code));
         return;
       }
+      if (diag.reason === 'hardware_muted') {
+        this.finishWithError(
+          options,
+          `${getMicMsg('hardware_muted', options.langConfig.code)} (Input: "${diag.activeDeviceLabel}").`
+        );
+        return;
+      }
       if (diag.reason === 'silent_device' && !priorSoundDetected) {
-        const deviceHint = diag.workingDeviceLabel
-          ? ` (Active device "${diag.activeDeviceLabel}" had no audio; working mic found: "${diag.workingDeviceLabel}").`
+        const altHint = diag.workingDeviceLabel
+          ? ` Found working mic: "${diag.workingDeviceLabel}".`
           : '';
-        this.finishWithError(options, `${getMicMsg('no_voice', options.langConfig.code)}${deviceHint}`);
+        const errHint = this.lastWebSpeechError ? ` [Speech API: ${this.lastWebSpeechError}]` : '';
+        this.finishWithError(
+          options,
+          `${getMicMsg('no_voice', options.langConfig.code)} (Input: "${diag.activeDeviceLabel}", level: 0%).${altHint}${errHint}`
+        );
         return;
       }
 
+      const errHint = this.lastWebSpeechError ? ` [Speech API: ${this.lastWebSpeechError}]` : '';
       this.finishWithError(
         options,
         priorSoundDetected || diag.ok || diag.reason === 'context_suspended'
-          ? getMicMsg('transcription_unavailable', options.langConfig.code)
+          ? `${getMicMsg('transcription_unavailable', options.langConfig.code)}${errHint}`
           : getMicMsg('timed_out', options.langConfig.code)
       );
       return;
@@ -982,9 +1059,11 @@ class MultilingualSpeechRecognitionController {
     }
 
     try {
-      const opened = await this.openHealthyStream(options.preferredDeviceId, false);
-      const stream = opened.stream;
-      const trackLabel = opened.trackLabel;
+      // Open raw_mono directly in ONE clean call (avoids stop->reopen WASAPI race on Intel SST)
+      const stream = await openAudioStreamWithStrategy(options.preferredDeviceId, 'raw_mono');
+      const track = stream.getAudioTracks()[0];
+      const trackLabel = track?.label || 'Default Microphone';
+      const trackMuted = Boolean(track?.muted);
 
       if (mySessionId !== this.sessionId || this.aborted || this.submitted) {
         stream.getTracks().forEach((t) => t.stop());
@@ -1019,7 +1098,6 @@ class MultilingualSpeechRecognitionController {
         this.vadInterval = setInterval(() => {
           if (mySessionId !== this.sessionId || this.aborted) return;
 
-          // Only read and count frames when the AudioContext is genuinely running and advancing!
           const isRunning =
             graph.audioCtx.state === 'running' && graph.audioCtx.currentTime > initialCtxTime;
           if (!isRunning) {
@@ -1062,6 +1140,7 @@ class MultilingualSpeechRecognitionController {
         const wasAborted = this.aborted || mySessionId !== this.sessionId;
         const durationMs = Date.now() - startedAt;
         const userClickedStop = this.manualStopRequested;
+        const finalMuted = trackMuted || Boolean(track?.muted);
         this.cleanupMediaFallback();
         options.onAudioLevel?.(0);
 
@@ -1074,20 +1153,29 @@ class MultilingualSpeechRecognitionController {
         const recordedType = recorder.mimeType || mimeType || 'audio/webm';
         const blob = new Blob(chunks, { type: recordedType });
 
-        // NEVER falsely blame the microphone hardware unless the AudioContext genuinely ran
-        // and recorded sustained pure digital zero alongside tiny/empty audio data.
+        // If hardware track is literally muted by OS/keyboard, tell the user accurately
+        if (finalMuted && !hadSpeech && peakRms < 0.00015) {
+          this.finishWithError(
+            options,
+            `${getMicMsg('hardware_muted', options.langConfig.code)} (Input: "${trackLabel}").`
+          );
+          return;
+        }
+
+        // Only reject as empty/silent if MediaRecorder itself produced <350 bytes OR verified-running context saw pure zero + tiny blob
         const confirmedDeadMic =
           verifiedRunningFrames >= 12 &&
           !hadSpeech &&
-          peakRms < 0.00015 &&
+          peakRms < 0.0001 &&
           !userClickedStop &&
           durationMs >= 1500 &&
-          blob.size < 2000;
+          blob.size < 1200;
 
         if (blob.size < 350 || confirmedDeadMic) {
+          const errHint = this.lastWebSpeechError ? ` [Speech API: ${this.lastWebSpeechError}]` : '';
           this.finishWithError(
             options,
-            `${getMicMsg('no_voice', options.langConfig.code)} (Input: "${trackLabel}").`
+            `${getMicMsg('no_voice', options.langConfig.code)} (Input: "${trackLabel}").${errHint}`
           );
           return;
         }
@@ -1130,14 +1218,23 @@ class MultilingualSpeechRecognitionController {
 
           if (errCode === 'transcription_unavailable' || response.status === 503) {
             this.cloudTranscribeBlockedUntil = Date.now() + 60_000;
-            const reasonHint =
-              this.lastWebSpeechError === 'network'
-                ? ' (Browser speech service returned network error).'
+            // Distinguish accurately: if audio WAS non-zero OR blob was substantial, say transcription_unavailable;
+            // only if verified-running context measured zero signal, report accurate 0% input diagnostic.
+            if (verifiedRunningFrames >= 12 && !hadSpeech && peakRms < 0.00015 && !userClickedStop) {
+              const errHint = this.lastWebSpeechError ? ` [Speech API: ${this.lastWebSpeechError}]` : '';
+              this.finishWithError(
+                options,
+                `${getMicMsg('no_voice', options.langConfig.code)} (Input: "${trackLabel}", level: 0%).${errHint}`
+              );
+            } else {
+              const reasonHint = this.lastWebSpeechError
+                ? ` [Speech API: ${this.lastWebSpeechError}]`
                 : '';
-            this.finishWithError(
-              options,
-              `${getMicMsg('transcription_unavailable', options.langConfig.code)}${reasonHint}`
-            );
+              this.finishWithError(
+                options,
+                `${getMicMsg('transcription_unavailable', options.langConfig.code)}${reasonHint}`
+              );
+            }
           } else {
             this.finishWithError(options, getMicMsg('network_fallback_failed', options.langConfig.code));
           }
@@ -1163,7 +1260,7 @@ class MultilingualSpeechRecognitionController {
         if (recorder.state !== 'inactive') {
           recorder.stop();
         }
-      }, 5500);
+      }, 5000);
     } catch (err: any) {
       this.cleanupMediaFallback();
       if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {

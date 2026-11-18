@@ -223,30 +223,54 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
     });
   };
 
-  // Run quick 1-second microphone hardware & input level check
+  // Run quick 1.4-second microphone hardware & input level check
   const handleTestMicrophone = async () => {
     if (isTestingMic || isListening) return;
     setIsTestingMic(true);
-    setMicTestStatus('Testing microphone — please say "Hello"...');
-    const result = await voiceRecognitionController.testMicrophone(selectedMicId || undefined, 1100);
+    setMicLevel(0);
+    setMicTestStatus('Testing microphone — please speak now...');
+    const result = await voiceRecognitionController.testMicrophone(
+      selectedMicId || undefined,
+      1400,
+      (lvl) => setMicLevel(lvl)
+    );
     setMicDevices(result.devices);
     setIsTestingMic(false);
+    setMicLevel(0);
+
+    const pct = Math.round(result.peakLevel * 100);
     if (result.ok) {
       setMicErrorMessage('');
-      setMicTestStatus(`Mic working (${result.activeDeviceLabel || 'Default'})`);
+      setMicTestStatus(`Mic working (${result.activeDeviceLabel || 'Default'}, signal ${pct}%)`);
     } else if (result.reason === 'permission_denied') {
-      setMicTestStatus('Microphone permission blocked in browser');
+      const msg = 'Microphone permission blocked in browser address bar.';
+      setMicTestStatus(msg);
+      setMicErrorMessage(msg);
     } else if (result.reason === 'no_device') {
-      setMicTestStatus('No microphone hardware found');
+      const msg = 'No microphone hardware detected.';
+      setMicTestStatus(msg);
+      setMicErrorMessage(msg);
     } else if (result.reason === 'busy') {
-      setMicTestStatus('Mic is busy in another app/tab');
+      const msg = 'Microphone is currently busy in another app or tab.';
+      setMicTestStatus(msg);
+      setMicErrorMessage(msg);
+    } else if (result.reason === 'hardware_muted') {
+      const msg = `OS/Hardware mic mute detected on "${result.activeDeviceLabel || 'Default'}" (track.muted=true). Check laptop F4/F8 mic-mute key or Windows Sound Input.`;
+      setMicTestStatus(msg);
+      setMicErrorMessage(msg);
     } else if (result.reason === 'context_suspended') {
-      setMicTestStatus(`Mic connected (${result.activeDeviceLabel || 'Default'}) — tap mic button again to speak`);
+      const msg = `Mic connected (${result.activeDeviceLabel || 'Default'}) — tap mic button again to speak.`;
+      setMicTestStatus(msg);
+      setMicErrorMessage(msg);
     } else if (result.workingDeviceId && result.workingDeviceLabel) {
       setSelectedMicId(result.workingDeviceId);
-      setMicTestStatus(`Default silent; found working mic: ${result.workingDeviceLabel}`);
+      const msg = `Switched from silent default to working mic: ${result.workingDeviceLabel}`;
+      setMicTestStatus(msg);
+      setMicErrorMessage('');
     } else {
-      setMicTestStatus(`No sound received on ${result.activeDeviceLabel || 'Default Mic'}`);
+      const msg = `No audio signal (0%) received from "${result.activeDeviceLabel || 'Default Mic'}". Try a headset or check Windows Sound Settings -> Input.`;
+      setMicTestStatus(msg);
+      setMicErrorMessage(msg);
     }
   };
 
@@ -552,14 +576,22 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
             </div>
           </div>
 
-          {/* Mic Error Banner with guidance & 1-click mic test */}
-          {micErrorMessage && (
+          {/* Mic Error / Diagnostic Banner with guidance & 1-click mic test */}
+          {(micErrorMessage || (micTestStatus && !showSettings)) && (
             <div className="p-2.5 px-5 bg-amber-50 border-b border-amber-300 text-xs text-amber-900 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 min-w-0">
                 <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>{micErrorMessage}</span>
+                <span className="break-words">{micTestStatus && !micErrorMessage ? micTestStatus : micErrorMessage}</span>
               </div>
               <div className="flex items-center gap-2 shrink-0">
+                {isTestingMic && (
+                  <div className="w-12 h-2 bg-amber-200 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-600 transition-all duration-75"
+                      style={{ width: `${Math.max(8, Math.round(micLevel * 100))}%` }}
+                    />
+                  </div>
+                )}
                 <button
                   onClick={handleTestMicrophone}
                   disabled={isTestingMic}
@@ -568,7 +600,10 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
                   {isTestingMic ? 'Testing...' : 'Test Mic'}
                 </button>
                 <button
-                  onClick={() => setMicErrorMessage('')}
+                  onClick={() => {
+                    setMicErrorMessage('');
+                    setMicTestStatus('');
+                  }}
                   className="text-amber-700 hover:text-amber-950 font-bold px-1 cursor-pointer"
                 >
                   ✕
