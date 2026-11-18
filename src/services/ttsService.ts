@@ -122,6 +122,15 @@ class MultilingualTtsController {
   private activeAudio: HTMLAudioElement | null = null;
   private cancelPendingPlay: (() => void) | null = null;
 
+  public isSpeaking(): boolean {
+    const audioPlaying = Boolean(this.activeAudio && !this.activeAudio.paused && !this.activeAudio.ended);
+    const synthPlaying =
+      typeof window !== 'undefined' &&
+      'speechSynthesis' in window &&
+      Boolean(window.speechSynthesis.speaking || window.speechSynthesis.pending);
+    return audioPlaying || synthPlaying;
+  }
+
   public stop(): void {
     this.sessionId += 1;
 

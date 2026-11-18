@@ -227,7 +227,8 @@ Speak directly to the farmer in 2 to 4 clear, respectful, natural spoken sentenc
 Target language hint: ${langLabel}.
 Output ONLY the exact transcribed words in the spoken language script (if no intelligible speech is present or only silence/noise, return an empty string). Do not add commentary or quotes.`;
 
-      const modelsToTry = ['gemini-3.5-transcribe', 'gemini-4-hydrogen'];
+      const modelsToTry = ['gemini-3.5-transcribe', 'gemini-4-hydrogen', 'gemini-2.5-flash'];
+      let lastErrorMsg = '';
       for (const model of modelsToTry) {
         try {
           const timeoutPromise = new Promise<never>((_, reject) =>
@@ -241,18 +242,20 @@ Output ONLY the exact transcribed words in the spoken language script (if no int
           const transcript = (response.text || '').trim().replace(/^["']|["']$/g, '');
           return res.json({ success: true, transcript, language });
         } catch (apiErr: any) {
+          lastErrorMsg = `${model}: ${apiErr?.status || ''} ${apiErr?.message || String(apiErr)}`.trim();
+          console.warn('[Transcribe] Model attempt failed:', lastErrorMsg);
           if (
             apiErr?.status === 403 ||
             String(apiErr?.message || '').includes('403') ||
             String(apiErr?.message || '').includes('PERMISSION_DENIED')
           ) {
             markGeminiBlocked();
-            break;
+            return res.status(503).json({ success: false, error: 'transcription_unavailable', detail: lastErrorMsg });
           }
         }
       }
 
-      return res.status(502).json({ success: false, error: 'transcription_failed' });
+      return res.status(502).json({ success: false, error: 'transcription_failed', detail: lastErrorMsg });
     } catch (err: any) {
       console.error('Audio Transcribe Error:', err);
       return res.status(500).json({ success: false, error: 'transcription_error' });

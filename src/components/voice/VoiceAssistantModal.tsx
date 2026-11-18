@@ -22,7 +22,12 @@ import { useAuth } from '../../context/AuthContext';
 import { LanguageCode } from '../../types';
 import { aiAgentController } from '../../services/aiAgent/aiAgentController';
 import { ttsController, findBestBrowserVoice } from '../../services/ttsService';
-import { voiceRecognitionController } from '../../services/speechRecognitionService';
+import {
+  voiceRecognitionController,
+  MicListeningPhase,
+  MicDeviceInfo,
+  listAudioInputDevices,
+} from '../../services/speechRecognitionService';
 
 interface VoiceAssistantModalProps {
   isOpen: boolean;
@@ -43,6 +48,12 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
   const [speechSpeed, setSpeechSpeed] = useState<number>(1.0);
   const [inputText, setInputText] = useState('');
   const [micErrorMessage, setMicErrorMessage] = useState<string>('');
+  const [micPhase, setMicPhase] = useState<MicListeningPhase>('listening');
+  const [micLevel, setMicLevel] = useState<number>(0);
+  const [micDevices, setMicDevices] = useState<MicDeviceInfo[]>([]);
+  const [selectedMicId, setSelectedMicId] = useState<string>('');
+  const [micTestStatus, setMicTestStatus] = useState<string>('');
+  const [isTestingMic, setIsTestingMic] = useState(false);
   const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedVoiceURI, setSelectedVoiceURI] = useState<string>('');
   const [showSettings, setShowSettings] = useState(false);
@@ -128,16 +139,22 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
       window.speechSynthesis.addEventListener('voiceschanged', updateVoices);
       return () => {
         window.speechSynthesis.removeEventListener('voiceschanged', updateVoices);
+      };
+    }
+    return undefined;
+  }, [currentLanguageConfig]);
+
+  // Stop voice & listening only when modal unmounts or transitions from open to closed
+  useEffect(() => {
+    if (isOpen) {
+      void listAudioInputDevices().then(setMicDevices);
+      return () => {
         voiceRecognitionController.stopListening(false);
         stopAllAudio();
       };
     }
-
-    return () => {
-      voiceRecognitionController.stopListening(false);
-      stopAllAudio();
-    };
-  }, [currentLanguageConfig]);
+    return undefined;
+  }, [isOpen]);
 
   // When language is switched in modal, update messages greeting and speak if autoSpeak
   const handleLanguageChange = (newLang: LanguageCode) => {
@@ -206,40 +223,82 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
     });
   };
 
-  // Toggle Speech Recognition cleanly (no leaked getUserMedia + automatic MediaRecorder AI fallback)
+  // Run quick 1-second microphone hardware & input level check
+  const handleTestMicrophone = async () => {
+    if (isTestingMic || isListening) return;
+    setIsTestingMic(true);
+    setMicTestStatus('Testing microphone — please say "Hello"...');
+    const result = await voiceRecognitionController.testMicrophone(selectedMicId || undefined, 1100);
+    setMicDevices(result.devices);
+    setIsTestingMic(false);
+    if (result.ok) {
+      setMicErrorMessage('');
+      setMicTestStatus(`Mic working (${result.activeDeviceLabel || 'Default'})`);
+    } else if (result.reason === 'permission_denied') {
+      setMicTestStatus('Microphone permission blocked in browser');
+    } else if (result.reason === 'no_device') {
+      setMicTestStatus('No microphone hardware found');
+    } else if (result.reason === 'busy') {
+      setMicTestStatus('Mic is busy in another app/tab');
+    } else if (result.reason === 'context_suspended') {
+      setMicTestStatus(`Mic connected (${result.activeDeviceLabel || 'Default'}) — tap mic button again to speak`);
+    } else if (result.workingDeviceId && result.workingDeviceLabel) {
+      setSelectedMicId(result.workingDeviceId);
+      setMicTestStatus(`Default silent; found working mic: ${result.workingDeviceLabel}`);
+    } else {
+      setMicTestStatus(`No sound received on ${result.activeDeviceLabel || 'Default Mic'}`);
+    }
+  };
+
+  // Toggle Speech Recognition synchronously inside user click handler
   const toggleListening = () => {
-    primeAudio();
+    const ttsWasPlaying = ttsController.isSpeaking();
     stopAllAudio();
     setMicErrorMessage('');
+    setMicTestStatus('');
 
     if (isListening || voiceRecognitionController.isListening()) {
       voiceRecognitionController.stopListening(true);
       setIsListening(false);
+      setMicLevel(0);
       return;
     }
 
     setTranscript('');
+    setMicPhase('starting');
+    setMicLevel(0);
 
     voiceRecognitionController.startListening({
       langConfig: currentLanguageConfig,
+      preferredDeviceId: selectedMicId || undefined,
+      ttsWasPlaying,
       onStart: () => {
         setIsListening(true);
         setMicErrorMessage('');
+      },
+      onPhaseChange: (phase) => {
+        setMicPhase(phase);
+      },
+      onAudioLevel: (level) => {
+        setMicLevel(level);
       },
       onInterimTranscript: (text) => {
         setTranscript(text);
       },
       onFinalTranscript: (finalText) => {
         setIsListening(false);
+        setMicLevel(0);
         setTranscript('');
         void handleUserQuery(finalText);
       },
       onError: (errMsg) => {
         setIsListening(false);
+        setMicLevel(0);
         setMicErrorMessage(errMsg);
       },
       onEnd: () => {
         setIsListening(false);
+        setMicLevel(0);
       },
     });
   };
@@ -493,19 +552,28 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
             </div>
           </div>
 
-          {/* Mic Error Banner with guidance */}
+          {/* Mic Error Banner with guidance & 1-click mic test */}
           {micErrorMessage && (
             <div className="p-2.5 px-5 bg-amber-50 border-b border-amber-300 text-xs text-amber-900 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
                 <span>{micErrorMessage}</span>
               </div>
-              <button
-                onClick={() => setMicErrorMessage('')}
-                className="text-amber-700 hover:text-amber-950 font-bold px-1"
-              >
-                ✕
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={handleTestMicrophone}
+                  disabled={isTestingMic}
+                  className="px-2.5 py-0.5 rounded-full bg-amber-200/80 hover:bg-amber-300 text-amber-950 font-bold text-[11px] cursor-pointer disabled:opacity-50"
+                >
+                  {isTestingMic ? 'Testing...' : 'Test Mic'}
+                </button>
+                <button
+                  onClick={() => setMicErrorMessage('')}
+                  className="text-amber-700 hover:text-amber-950 font-bold px-1 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
           )}
 
@@ -572,6 +640,36 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
                     {s.label}
                   </button>
                 ))}
+              </div>
+
+              <div className="w-full flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#064e3b15]">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-[#064e3b]">Mic Input:</span>
+                  <select
+                    value={selectedMicId}
+                    onChange={(e) => setSelectedMicId(e.target.value)}
+                    className="px-2 py-1 rounded-lg bg-white border border-[#064e3b25] text-[11px] text-[#064e3b] max-w-[210px]"
+                  >
+                    <option value="">System Default Microphone</option>
+                    {micDevices.map((d) => (
+                      <option key={d.deviceId} value={d.deviceId}>
+                        {d.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleTestMicrophone}
+                    disabled={isTestingMic}
+                    className="px-2.5 py-1 rounded-lg bg-[#064e3b] text-white text-[11px] font-bold hover:bg-emerald-800 cursor-pointer disabled:opacity-50"
+                  >
+                    {isTestingMic ? 'Testing Mic...' : 'Test Microphone'}
+                  </button>
+                  {micTestStatus && (
+                    <span className="text-[11px] font-semibold text-[#064e3b]">{micTestStatus}</span>
+                  )}
+                </div>
               </div>
             </motion.div>
           )}
@@ -684,18 +782,42 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({ isOpen
             {/* Live Listening Waveform */}
             {isListening && (
               <div className="flex items-center justify-center gap-1.5 h-7">
-                {[40, 80, 100, 60, 95, 50, 85, 65, 90, 45, 75].map((height, i) => (
-                  <motion.div
-                    key={i}
-                    animate={{ height: [`${height * 0.2}%`, `${height}%`, `${height * 0.3}%`] }}
-                    transition={{ repeat: Infinity, duration: 0.5 + i * 0.05, ease: 'easeInOut' }}
-                    className="w-1.5 bg-[#064e3b] rounded-full"
-                  />
-                ))}
+                {[40, 80, 100, 60, 95, 50, 85, 65, 90, 45, 75].map((height, i) => {
+                  const activeBoost =
+                    micLevel > 0.02
+                      ? Math.max(20, Math.min(100, height * (0.35 + micLevel * 0.85)))
+                      : micPhase === 'hearing_sound'
+                      ? height
+                      : Math.max(18, height * 0.35);
+                  return (
+                    <motion.div
+                      key={i}
+                      animate={{
+                        height: [
+                          `${Math.max(15, activeBoost * 0.45)}%`,
+                          `${activeBoost}%`,
+                          `${Math.max(15, activeBoost * 0.55)}%`,
+                        ],
+                      }}
+                      transition={{ repeat: Infinity, duration: 0.45 + i * 0.04, ease: 'easeInOut' }}
+                      className={`w-1.5 rounded-full ${
+                        micPhase === 'hearing_sound' || micLevel > 0.05 ? 'bg-emerald-600' : 'bg-[#064e3b]'
+                      }`}
+                    />
+                  );
+                })}
                 <span className="ml-3 text-xs font-bold text-[#064e3b] animate-pulse">
-                  {language === 'kn'
-                    ? `ಕನ್ನಡದಲ್ಲಿ ಆಲಿಸಲಾಗುತ್ತಿದೆ... (${currentLanguageConfig.speechCode})`
-                    : `Listening in ${currentLanguageConfig.nativeName}...`}
+                  {micPhase === 'transcribing'
+                    ? 'Processing speech...'
+                    : micPhase === 'hearing_sound'
+                    ? language === 'kn'
+                      ? 'ಧ್ವನಿ ಕೇಳಿಸುತ್ತಿದೆ — ಮಾತನಾಡಿ...'
+                      : `Hearing voice in ${currentLanguageConfig.nativeName}...`
+                    : micPhase === 'starting'
+                    ? 'Starting microphone...'
+                    : language === 'kn'
+                    ? `ಕನ್ನಡದಲ್ಲಿ ಆಲಿಸಲಾಗುತ್ತಿದೆ — ಈಗ ಮಾತನಾಡಿ (${currentLanguageConfig.speechCode})`
+                    : `Listening in ${currentLanguageConfig.nativeName} — Speak now...`}
                 </span>
               </div>
             )}

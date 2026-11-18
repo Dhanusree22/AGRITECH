@@ -21,21 +21,18 @@ import { useAuth } from '../../context/AuthContext';
 import { LanguageCode } from '../../types';
 import { aiAgentController } from '../../services/aiAgent/aiAgentController';
 import { ttsController } from '../../services/ttsService';
-import { voiceRecognitionController } from '../../services/speechRecognitionService';
+import { voiceRecognitionController, MicListeningPhase } from '../../services/speechRecognitionService';
 
 export const AIChatbotWidget: React.FC = () => {
   const { language, currentLanguageConfig, t, languages, setLanguage } = useLanguage();
   const { role, user } = useAuth();
 
-  // Admin module must NOT include AI chatbot as per user instructions
-  if (role === 'admin') {
-    return null;
-  }
-
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [micPhase, setMicPhase] = useState<MicListeningPhase>('listening');
+  const [micLevel, setMicLevel] = useState<number>(0);
   const [micError, setMicError] = useState<string>('');
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
@@ -256,38 +253,52 @@ export const AIChatbotWidget: React.FC = () => {
     }
   };
 
-  // Toggle Microphone Speech-to-Text cleanly (no leaked getUserMedia + automatic MediaRecorder AI fallback)
+  // Toggle Microphone Speech-to-Text synchronously on user click
   const toggleListening = () => {
-    primeAudioContext();
+    const ttsWasPlaying = ttsController.isSpeaking();
     stopSpeech();
     setMicError('');
 
     if (isListening || voiceRecognitionController.isListening()) {
       voiceRecognitionController.stopListening(true);
       setIsListening(false);
+      setMicLevel(0);
       return;
     }
 
+    setMicPhase('starting');
+    setMicLevel(0);
+
     voiceRecognitionController.startListening({
       langConfig: currentLanguageConfig,
+      ttsWasPlaying,
       onStart: () => {
         setIsListening(true);
         setMicError('');
+      },
+      onPhaseChange: (phase) => {
+        setMicPhase(phase);
+      },
+      onAudioLevel: (level) => {
+        setMicLevel(level);
       },
       onInterimTranscript: (text) => {
         setInput(text);
       },
       onFinalTranscript: (finalText) => {
         setIsListening(false);
+        setMicLevel(0);
         setInput('');
         void handleSend(finalText);
       },
       onError: (errMsg) => {
         setIsListening(false);
+        setMicLevel(0);
         setMicError(errMsg);
       },
       onEnd: () => {
         setIsListening(false);
+        setMicLevel(0);
       },
     });
   };
@@ -341,6 +352,11 @@ export const AIChatbotWidget: React.FC = () => {
   };
 
   const currentQuestions = sampleQuestionsByLang[language] || sampleQuestionsByLang.en;
+
+  // Admin module must NOT include AI chatbot as per user instructions
+  if (role === 'admin') {
+    return null;
+  }
 
   return (
     <>
@@ -577,7 +593,17 @@ export const AIChatbotWidget: React.FC = () => {
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-emerald-300 flex items-center gap-2">
                       <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
-                      {language === 'kn' ? 'ಮೈಕ್ರೊಫೋನ್ ಸಕ್ರಿಯವಾಗಿದೆ (ಕನ್ನಡದಲ್ಲಿ ಮಾತನಾಡಿ)...' : 'Listening (Speak now)...'}
+                      {micPhase === 'transcribing'
+                        ? 'Processing speech...'
+                        : micPhase === 'hearing_sound'
+                        ? language === 'kn'
+                          ? 'ಧ್ವನಿ ಕೇಳಿಸುತ್ತಿದೆ — ಮಾತನಾಡಿ...'
+                          : 'Hearing your voice...'
+                        : micPhase === 'starting'
+                        ? 'Starting microphone...'
+                        : language === 'kn'
+                        ? 'ಮೈಕ್ರೊಫೋನ್ ಸಕ್ರಿಯವಾಗಿದೆ (ಕನ್ನಡದಲ್ಲಿ ಮಾತನಾಡಿ)...'
+                        : 'Listening (Speak now)...'}
                     </span>
                     <button
                       onClick={toggleListening}
@@ -587,12 +613,26 @@ export const AIChatbotWidget: React.FC = () => {
                     </button>
                   </div>
 
-                  <div className="flex items-center justify-center gap-1.5 py-1">
-                    <span className="w-1.5 h-6 bg-emerald-400 rounded-full animate-pulse" />
-                    <span className="w-1.5 h-10 bg-emerald-300 rounded-full animate-pulse delay-75" />
-                    <span className="w-1.5 h-8 bg-emerald-400 rounded-full animate-pulse delay-150" />
-                    <span className="w-1.5 h-12 bg-[#C6FF4A] rounded-full animate-pulse delay-100" />
-                    <span className="w-1.5 h-7 bg-emerald-400 rounded-full animate-pulse delay-200" />
+                  <div className="flex items-center justify-center gap-1.5 py-1 h-10">
+                    {[20, 32, 26, 38, 24].map((px, idx) => {
+                      const scale =
+                        micLevel > 0.02
+                          ? Math.max(0.3, Math.min(1, 0.35 + micLevel * 0.75))
+                          : micPhase === 'hearing_sound'
+                          ? 0.95
+                          : 0.45;
+                      return (
+                        <span
+                          key={idx}
+                          style={{ height: `${Math.round(px * scale)}px` }}
+                          className={`w-1.5 rounded-full transition-all duration-100 ${
+                            micPhase === 'hearing_sound' || micLevel > 0.05
+                              ? 'bg-[#C6FF4A]'
+                              : 'bg-emerald-400 animate-pulse'
+                          }`}
+                        />
+                      );
+                    })}
                   </div>
 
                   {input && (

@@ -60,7 +60,8 @@ export default async function handler(req: any, res: any) {
 Target language hint: ${langLabel}.
 Output ONLY the exact transcribed words in the spoken language script (if no intelligible speech is present or only silence/noise, return an empty string). Do not add commentary or quotes.`;
 
-    const modelsToTry = ['gemini-3.5-transcribe', 'gemini-4-hydrogen'];
+    const modelsToTry = ['gemini-3.5-transcribe', 'gemini-4-hydrogen', 'gemini-2.5-flash'];
+    let lastErrorMsg = '';
     for (const model of modelsToTry) {
       try {
         const timeoutPromise = new Promise<never>((_, reject) =>
@@ -78,13 +79,19 @@ Output ONLY the exact transcribed words in the spoken language script (if no int
           language,
         });
       } catch (modelErr: any) {
-        if (model === modelsToTry[modelsToTry.length - 1]) {
-          console.warn('Vercel audio transcription failed:', modelErr?.message || modelErr);
+        lastErrorMsg = `${model}: ${modelErr?.status || ''} ${modelErr?.message || String(modelErr)}`.trim();
+        console.warn('[Vercel Transcribe] Model attempt failed:', lastErrorMsg);
+        if (
+          modelErr?.status === 403 ||
+          String(modelErr?.message || '').includes('403') ||
+          String(modelErr?.message || '').includes('PERMISSION_DENIED')
+        ) {
+          return res.status(503).json({ success: false, error: 'transcription_unavailable', detail: lastErrorMsg });
         }
       }
     }
 
-    return res.status(502).json({ success: false, error: 'transcription_failed' });
+    return res.status(502).json({ success: false, error: 'transcription_failed', detail: lastErrorMsg });
   } catch (err: any) {
     console.error('Vercel Transcribe Error:', err);
     return res.status(500).json({ success: false, error: 'transcription_error' });
