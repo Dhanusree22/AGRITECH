@@ -67,6 +67,13 @@ import { AICropQualityGradingTool } from '../../components/ai/AICropQualityGradi
 import { AINegotiationTool } from '../../components/ai/AINegotiationTool';
 import { VoiceAssistantModal } from '../../components/voice/VoiceAssistantModal';
 import { LanguageSelector } from '../../components/common/LanguageSelector';
+import {
+  calculateRealtimePrediction,
+  CROP_MASTER_LIST,
+  SUPPORTED_MANDIS,
+  resolveCanonicalCropName,
+  resolveCanonicalMandi,
+} from '../../services/mandiPredictionEngine';
 import { CropListing } from '../../types';
 
 // Mock Yield Trend Data for Recharts
@@ -77,17 +84,6 @@ const yieldTrendData = [
   { season: 'Kharif 2025', yieldTon: 26.8, predictedTon: 25.5, rainfallMm: 740 },
   { season: 'Rabi 2025', yieldTon: 31.4, predictedTon: 30.2, rainfallMm: 210 },
   { season: 'Current Season (Target)', yieldTon: 35.0, predictedTon: 36.2, rainfallMm: 580 },
-];
-
-// Price Trajectory Data
-const mandiPriceForecastData = [
-  { day: 'Day 1 (Observed)', price: 30, forecast: 30, lower: 29, upper: 31 },
-  { day: 'Day 2', price: 31, forecast: 31.5, lower: 30, upper: 33 },
-  { day: 'Day 3', price: 32, forecast: 33.0, lower: 31, upper: 35 },
-  { day: 'Day 4', price: null, forecast: 34.5, lower: 32, upper: 37 },
-  { day: 'Day 5', price: null, forecast: 36.0, lower: 33, upper: 39 },
-  { day: 'Day 6', price: null, forecast: 37.2, lower: 34, upper: 41 },
-  { day: 'Day 7', price: null, forecast: 38.5, lower: 35, upper: 43 },
 ];
 
 // Expense Pie Breakdown
@@ -121,6 +117,8 @@ export const FarmerDashboard: React.FC<{ navigate: (path: string) => void; initi
     bookLogistics,
     advisoryAlerts,
     mandiPrices,
+    agmarknetConfig,
+    syncAgmarknet,
   } = useStore();
 
   const [activeTab, setActiveTab] = useState(initialTab);
@@ -128,6 +126,98 @@ export const FarmerDashboard: React.FC<{ navigate: (path: string) => void; initi
   const [showAddCropModal, setShowAddCropModal] = useState(false);
   const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
+
+  // Dynamic Real-Time Overview & Prediction Tool selection state
+  const [overviewCrop, setOverviewCrop] = useState<string>('Tomato');
+  const [overviewMandi, setOverviewMandi] = useState<string>('Kolar APMC Market');
+  const [availableCropsList, setAvailableCropsList] = useState<string[]>(() => CROP_MASTER_LIST.map((c) => c.name));
+  const [availableMandisList, setAvailableMandisList] = useState<string[]>(() => SUPPORTED_MANDIS.map((m) => m.mandi));
+  const [overviewForecast, setOverviewForecast] = useState(() =>
+    calculateRealtimePrediction({
+      crop: 'Tomato',
+      mandi: 'Kolar APMC Market',
+      season: 'Current',
+      weatherFactor: 'Optimal',
+      holidayImpact: 'None',
+      horizonDays: 7,
+    })
+  );
+  const [marketSearch, setMarketSearch] = useState('');
+  const [marketSyncing, setMarketSyncing] = useState(false);
+
+  React.useEffect(() => {
+    let mounted = true;
+    fetch('/api/predictions/crops')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!mounted || !data) return;
+        if (Array.isArray(data.crops) && data.crops.length > 0) {
+          setAvailableCropsList(data.crops.map((c: any) => c.name));
+        }
+        if (Array.isArray(data.mandis) && data.mandis.length > 0) {
+          setAvailableMandisList(data.mandis.map((m: any) => m.mandi));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [agmarknetConfig.lastSyncedAt]);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    const canonicalCrop = resolveCanonicalCropName(overviewCrop);
+    const canonicalMandi = resolveCanonicalMandi(overviewMandi)?.mandi || overviewMandi;
+    setOverviewForecast(
+      calculateRealtimePrediction({
+        crop: canonicalCrop,
+        mandi: canonicalMandi,
+        season: 'Current',
+        weatherFactor: 'Optimal',
+        holidayImpact: 'None',
+        horizonDays: 7,
+      })
+    );
+
+    const qs = new URLSearchParams({
+      crop: canonicalCrop,
+      mandi: canonicalMandi,
+      days: '7',
+      season: 'Current',
+      weather: 'Optimal',
+      holiday: 'None',
+      language: language || 'en',
+    });
+    fetch(`/api/predictions/forecast?${qs.toString()}`, { signal: controller.signal })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!controller.signal.aborted && data?.forecast) {
+          setOverviewForecast(data.forecast);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      controller.abort();
+    };
+  }, [overviewCrop, overviewMandi, language, agmarknetConfig.lastSyncedAt]);
+
+  const overviewChartData = (overviewForecast.forecastPoints || overviewForecast.dailyPoints || [])
+    .slice(0, 7)
+    .map((pt, idx) => ({
+      day: idx === 0 ? `Today (${pt.dateStr})` : pt.dateStr,
+      price: idx === 0 ? pt.predictedPrice : null,
+      forecast: pt.predictedPrice,
+      lower: pt.minRange,
+      upper: pt.maxRange,
+    }));
+
+  const filteredMandiPrices = (mandiPrices || []).filter(
+    (m) =>
+      !marketSearch.trim() ||
+      m.crop.toLowerCase().includes(marketSearch.toLowerCase()) ||
+      m.mandi.toLowerCase().includes(marketSearch.toLowerCase()) ||
+      m.state.toLowerCase().includes(marketSearch.toLowerCase())
+  );
 
   // Settings state
   const [savedSettings, setSavedSettings] = useState(false);
@@ -497,10 +587,12 @@ export const FarmerDashboard: React.FC<{ navigate: (path: string) => void; initi
                     <Sparkles className="w-4 h-4 text-purple-600" />
                   </div>
                   <div className="flex items-baseline gap-2">
-                    <span className="text-2xl font-black text-purple-950">94.2%</span>
-                    <span className="text-xs text-purple-700 font-bold">High Precision</span>
+                    <span className="text-2xl font-black text-purple-950">{overviewForecast.confidenceScore}%</span>
+                    <span className="text-xs text-purple-700 font-bold">{overviewForecast.crop}</span>
                   </div>
-                  <p className="text-[10px] text-purple-700 font-semibold">Grounded on real AGMARKNET data</p>
+                  <p className="text-[10px] text-purple-700 font-semibold truncate">
+                    {overviewForecast.mandi} &bull; {overviewForecast.liveApiConnected ? 'Live data.gov.in' : 'AGMARKNET Grounded'}
+                  </p>
                 </div>
               </div>
 
@@ -593,34 +685,96 @@ export const FarmerDashboard: React.FC<{ navigate: (path: string) => void; initi
                 </div>
               </div>
 
-              {/* 7-Day APMC Price Forecast Line Chart with Uncertainty Range */}
+              {/* 7-Day APMC Price Forecast Line Chart with Live Crop & Mandi Selector */}
               <div className="p-6 rounded-3xl bg-slate-900 text-white shadow-xl space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                   <div>
                     <span className="text-[10px] font-black uppercase tracking-wider text-[#C6FF4A]">
-                      Forecasting Engine Grounded in Agmarknet Feed
+                      {overviewForecast.liveApiConnected
+                        ? `Live data.gov.in Verified · ${overviewForecast.actualTradingDate || 'Today'}`
+                        : `AGMARKNET Historical Baseline · ${overviewForecast.actualTradingDate || 'Baseline'}`}
                     </span>
                     <h3 className="text-base font-black text-white flex items-center gap-2">
-                      <BarChart3 className="w-4 h-4 text-[#C6FF4A]" /> 7-Day Mandi Price Prediction Curve (₹/kg)
+                      <BarChart3 className="w-4 h-4 text-[#C6FF4A]" /> {overviewForecast.crop} &bull; {overviewForecast.mandi} Forecast (₹/kg &amp; ₹/Qtl)
                     </h3>
                   </div>
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="px-3 py-1 rounded-full bg-white/10 text-emerald-300">Tomato (Hybrid)</span>
-                    <span className="px-3 py-1 rounded-full bg-emerald-500/20 text-[#C6FF4A] font-bold">Bullish +20.3%</span>
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <select
+                      value={overviewCrop}
+                      onChange={(e) => setOverviewCrop(e.target.value)}
+                      className="px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-bold text-xs outline-none"
+                    >
+                      {Array.from(new Set([...availableCropsList, overviewCrop])).map((cropName) => (
+                        <option key={cropName} value={cropName}>{cropName}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={overviewMandi}
+                      onChange={(e) => setOverviewMandi(e.target.value)}
+                      className="px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-bold text-xs outline-none"
+                    >
+                      {Array.from(new Set([...availableMandisList, overviewMandi])).map((mandiName) => (
+                        <option key={mandiName} value={mandiName}>{mandiName}</option>
+                      ))}
+                    </select>
+                    <span
+                      className={`px-3 py-1.5 rounded-full font-bold ${
+                        overviewForecast.changePercent >= 0
+                          ? 'bg-emerald-500/20 text-[#C6FF4A]'
+                          : 'bg-rose-500/20 text-rose-300'
+                      }`}
+                    >
+                      {overviewForecast.trend === 'up' ? 'Bullish' : overviewForecast.trend === 'down' ? 'Bearish' : 'Stable'}{' '}
+                      {overviewForecast.changePercent >= 0 ? '+' : ''}{overviewForecast.changePercent}%
+                    </span>
+                    <button
+                      onClick={() => {
+                        setActiveTab('prediction');
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-[#C6FF4A] text-[#123D2A] font-extrabold text-xs cursor-pointer hover:opacity-90"
+                    >
+                      Full Forecaster &rarr;
+                    </button>
+                  </div>
+                </div>
+
+                {/* Live Price Readouts for Selected Crop & Mandi */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+                  <div className="p-3 rounded-2xl bg-slate-800/80 border border-slate-700/80">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Actual Modal ({overviewForecast.actualTradingDate || 'Date'})</span>
+                    <span className="text-lg font-black text-white">₹{overviewForecast.todayPrice}/kg</span>
+                    <span className="text-[10px] text-slate-400 block">₹{overviewForecast.modalPriceQuintal || Math.round(overviewForecast.todayPrice * 100)}/Qtl</span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-slate-800/80 border border-slate-700/80">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">AI Tomorrow</span>
+                    <span className="text-lg font-black text-[#C6FF4A]">₹{overviewForecast.tomorrowPrice}/kg</span>
+                    <span className="text-[10px] text-slate-400 block">₹{Math.round(overviewForecast.tomorrowPrice * 100)}/Qtl</span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-slate-800/80 border border-slate-700/80">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">AI 7-Day Target</span>
+                    <span className="text-lg font-black text-cyan-300">₹{overviewForecast.day7Price}/kg</span>
+                    <span className="text-[10px] text-slate-400 block">₹{Math.round(overviewForecast.day7Price * 100)}/Qtl</span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-slate-800/80 border border-slate-700/80">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Recommendation</span>
+                    <span className="text-xs font-bold text-emerald-300 block truncate">
+                      {overviewForecast.recommendation?.verdict?.replace(/_/g, ' ') || 'HOLD'}
+                    </span>
                   </div>
                 </div>
 
                 <div className="h-60 w-full pt-2">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={mandiPriceForecastData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <LineChart data={overviewChartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                       <XAxis dataKey="day" stroke="#94a3b8" tick={{ fontSize: 10 }} />
-                      <YAxis stroke="#94a3b8" tick={{ fontSize: 10 }} unit="₹" domain={[25, 45]} />
+                      <YAxis stroke="#94a3b8" tick={{ fontSize: 10 }} unit="₹" domain={['auto', 'auto']} />
                       <Tooltip
                         contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px', fontSize: '11px' }}
                       />
                       <Legend wrapperStyle={{ fontSize: '11px' }} />
-                      <Line type="monotone" dataKey="price" stroke="#10B981" strokeWidth={3} dot={{ r: 5 }} name="Observed Mandi Price" />
+                      <Line type="monotone" dataKey="price" stroke="#10B981" strokeWidth={3} dot={{ r: 5 }} name="Observed Today" />
                       <Line type="monotone" dataKey="forecast" stroke="#F5A623" strokeWidth={3} strokeDasharray="5 5" dot={{ r: 5 }} name="AI Model Forecast" />
                       <Line type="monotone" dataKey="upper" stroke="#64748b" strokeWidth={1} strokeDasharray="2 2" dot={false} name="Upper Uncertainty (95% CI)" />
                       <Line type="monotone" dataKey="lower" stroke="#64748b" strokeWidth={1} strokeDasharray="2 2" dot={false} name="Lower Uncertainty (95% CI)" />
@@ -853,20 +1007,20 @@ export const FarmerDashboard: React.FC<{ navigate: (path: string) => void; initi
           {activeTab === 'prediction' && (
             <div className="space-y-6">
               <div className="p-6 rounded-3xl bg-white/85 backdrop-blur-xl border border-white/80 shadow-xl space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-2">
                   <div>
                     <h2 className="text-xl font-black text-[#123D2A] flex items-center gap-2">
                       <TrendingUp className="w-5 h-5 text-[#10B981]" /> AI Price Forecasting Tool (APMC Grounded)
                     </h2>
                     <p className="text-xs text-[#18251E]/70">
-                      Predict mandi modal prices 7 to 30 days ahead based on arrivals, rainfall patterns, and holiday demand.
+                      Predict mandi modal prices 7 to 90 days ahead based on live data.gov.in arrivals, rainfall patterns, and festival demand.
                     </p>
                   </div>
                   <span className="text-[10px] px-3 py-1 rounded-full bg-cyan-100 text-cyan-900 font-bold">
-                    Official Agmarknet Feed
+                    {agmarknetConfig.source}
                   </span>
                 </div>
-                <AIPricePredictionTool />
+                <AIPricePredictionTool mode="farmer" defaultCrop={overviewCrop} defaultMandi={overviewMandi} />
               </div>
             </div>
           )}
@@ -880,27 +1034,54 @@ export const FarmerDashboard: React.FC<{ navigate: (path: string) => void; initi
                 <div>
                   <h2 className="text-xl font-black text-[#123D2A]">National APMC Mandi Benchmark Rates</h2>
                   <p className="text-xs text-[#18251E]/70">
-                    Live market prices retrieved from Agmarknet / data.gov.in official government feeds.
+                    Live market prices retrieved from Agmarknet / data.gov.in government feeds ({filteredMandiPrices.length} market feeds).
                   </p>
                 </div>
-                <span className="text-[10px] font-bold px-3 py-1 rounded-full bg-emerald-100 text-[#123D2A] border border-emerald-300">
-                  Last Sync: Today 09:30 AM
-                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="Filter crop, mandi or state..."
+                    value={marketSearch}
+                    onChange={(e) => setMarketSearch(e.target.value)}
+                    className="px-3.5 py-1.5 rounded-full bg-white border border-[#123D2A]/15 text-xs font-semibold outline-none focus:border-[#10B981]"
+                  />
+                  <button
+                    onClick={async () => {
+                      setMarketSyncing(true);
+                      await syncAgmarknet();
+                      setMarketSyncing(false);
+                    }}
+                    disabled={marketSyncing}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-[#123D2A] text-white text-xs font-bold cursor-pointer disabled:opacity-60"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${marketSyncing ? 'animate-spin' : ''}`} />
+                    <span>{marketSyncing ? 'Syncing...' : 'Sync data.gov.in'}</span>
+                  </button>
+                  <span className="text-[10px] font-bold px-3 py-1 rounded-full bg-emerald-100 text-[#123D2A] border border-emerald-300">
+                    {agmarknetConfig.lastSyncedAt}
+                  </span>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {mandiPrices.map((m) => (
+                {filteredMandiPrices.map((m) => (
                   <div
                     key={m.id}
-                    className="p-5 rounded-3xl bg-white/85 backdrop-blur-xl border border-white/80 shadow-md space-y-3"
+                    className="p-5 rounded-3xl bg-white/85 backdrop-blur-xl border border-white/80 shadow-md space-y-3 hover:border-[#10B981] transition-all"
                   >
                     <div className="flex items-start justify-between">
                       <div>
                         <h4 className="font-extrabold text-base text-[#123D2A]">{m.crop}</h4>
                         <p className="text-xs text-[#18251E]/70">{m.mandi}, {m.state}</p>
                       </div>
-                      <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                        +{m.changePercent}%
+                      <span
+                        className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                          m.changePercent >= 0
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-rose-100 text-rose-800'
+                        }`}
+                      >
+                        {m.changePercent >= 0 ? '+' : ''}{m.changePercent}%
                       </span>
                     </div>
 
@@ -911,7 +1092,7 @@ export const FarmerDashboard: React.FC<{ navigate: (path: string) => void; initi
                       </div>
                       <div className="text-right">
                         <span className="text-xs font-bold text-[#059669]">₹{m.ai7DayForecastPerKg}/kg</span>
-                        <span className="text-[10px] text-[#18251E]/60 block font-semibold">7-Day Target</span>
+                        <span className="text-[10px] text-[#18251E]/60 block font-semibold">7-Day AI Target</span>
                       </div>
                     </div>
 
@@ -919,6 +1100,17 @@ export const FarmerDashboard: React.FC<{ navigate: (path: string) => void; initi
                       <div>Arrival: <strong>{m.arrivalTons} Tons</strong></div>
                       <div>Modal: <strong>₹{m.modalPrice}/Qtl</strong></div>
                     </div>
+
+                    <button
+                      onClick={() => {
+                        setOverviewCrop(m.crop);
+                        setOverviewMandi(m.mandi);
+                        setActiveTab('prediction');
+                      }}
+                      className="w-full py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-[#123D2A] font-bold text-[11px] transition-all cursor-pointer"
+                    >
+                      Run Detailed AI Forecast for {m.crop} &rarr;
+                    </button>
                   </div>
                 ))}
               </div>

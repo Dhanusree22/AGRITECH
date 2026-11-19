@@ -313,6 +313,9 @@ export class DynamicResponseGenerator {
       }
 
       case 'PRICE_PREDICTION': {
+        if (data.predictionAvailable === false) {
+          return data.unavailableReason || `AI price prediction for ${cropName} at ${mandiName} is currently unavailable due to insufficient historical AGMARKNET data.`;
+        }
         const { todayPrice, tomorrowPrice, day7Price, trend, changePercent, optimalSellingWindow: rawSellingWindow, verdict } = data;
         const trendDirection = trend === 'up' ? 'upward' : trend === 'down' ? 'downward' : 'stable';
         const changeSign = changePercent > 0 ? `+${changePercent}%` : `${changePercent}%`;

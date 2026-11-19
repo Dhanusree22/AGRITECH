@@ -8,8 +8,8 @@ import {
   SUPPORTED_MANDIS,
   CROP_MASTER_LIST,
   executeCropMarketForecast,
-  ComprehensivePredictionResult,
-  MarketPriceRecord,
+  resolveCanonicalCropName,
+  resolveCanonicalMandi,
 } from '../mandiPredictionEngine';
 import { AGRONOMIC_KNOWLEDGE, CropAgronomyGuide } from './agriculturalKnowledgeBase';
 
@@ -26,30 +26,33 @@ export class ToolRoutingEngine {
   // Canonical crop resolver
   public resolveCanonicalCrop(cropEntity?: string): string {
     if (!cropEntity) return 'Tomato';
-    const clean = cropEntity.toLowerCase().trim();
-    const match = CROP_MASTER_LIST.find(
-      (c) =>
-        c.name.toLowerCase() === clean ||
-        c.name.toLowerCase().includes(clean) ||
-        clean.includes(c.name.toLowerCase()) ||
-        c.id.toLowerCase() === clean ||
-        c.kannadaName.toLowerCase().includes(clean) ||
-        c.hindiName.toLowerCase().includes(clean)
-    );
-    return match ? match.name : 'Tomato';
+    return resolveCanonicalCropName(cropEntity);
   }
 
   // Canonical mandi resolver
   public resolveCanonicalMandi(mandiEntity?: string, defaultBenchmarkMandi?: string): string {
-    if (!mandiEntity) return defaultBenchmarkMandi || 'Kolar APMC Mandi';
-    const clean = mandiEntity.toLowerCase().trim();
-    const match = SUPPORTED_MANDIS.find(
-      (m) =>
-        m.mandi.toLowerCase() === clean ||
-        m.mandi.toLowerCase().includes(clean) ||
-        clean.includes(m.mandi.toLowerCase().replace(/ apmc| mandi|\(.*\)/g, '').trim())
-    );
-    return match ? match.mandi : (defaultBenchmarkMandi || 'Kolar APMC Mandi');
+    if (!mandiEntity) return defaultBenchmarkMandi || 'Kolar APMC Market';
+    return resolveCanonicalMandi(mandiEntity)?.mandi || defaultBenchmarkMandi || mandiEntity;
+  }
+
+  private async fetchLiveForecast(crop: string, mandi: string, horizon: number): Promise<any | null> {
+    if (typeof window === 'undefined' || typeof fetch === 'undefined') return null;
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 2800);
+      const qs = new URLSearchParams({
+        crop,
+        mandi,
+        days: String(horizon),
+      });
+      const res = await fetch(`/api/predictions/forecast?${qs.toString()}`, { signal: controller.signal });
+      clearTimeout(timer);
+      if (!res.ok) return null;
+      const payload = await res.json();
+      return payload?.forecast || null;
+    } catch {
+      return null;
+    }
   }
 
   public async executeTool(
@@ -63,20 +66,21 @@ export class ToolRoutingEngine {
 
     switch (intent) {
       case 'MARKET_PRICE': {
+        const liveForecast = await this.fetchLiveForecast(crop, mandi, 7);
         const record = marketDataRepository.getLatestRecord(crop, mandi);
-        const modalPrice = record ? record.modalPrice : cropMeta.baseModalPriceQuintal;
-        const pricePerKg = record ? record.pricePerKg : modalPrice / 100;
+        const pricePerKg = liveForecast?.todayPrice ?? (record ? record.pricePerKg : cropMeta.baseModalPriceQuintal / 100);
+        const modalPrice = Math.round(pricePerKg * 100);
         const minPrice = record ? record.minPrice : Math.round(modalPrice * 0.9);
         const maxPrice = record ? record.maxPrice : Math.round(modalPrice * 1.1);
-        const arrivalTons = record ? record.arrivalTons : 320;
-        const tradingDate = record ? record.tradingDate : new Date().toISOString().split('T')[0];
+        const arrivalTons = liveForecast?.marketSignals?.currentArrivalTons ?? (record ? record.arrivalTons : 320);
+        const tradingDate = liveForecast?.liveLastUpdated || (record ? record.tradingDate : new Date().toISOString().split('T')[0]);
 
         // Also get comparison with nearby mandis
         const crossMandis = marketDataRepository.getCrossMandiComparison(crop);
         const topMandi = [...crossMandis].sort((a, b) => b.pricePerKg - a.pricePerKg)[0];
 
         return {
-          toolName: 'marketDataRepository.getLatestRecord',
+          toolName: liveForecast?.liveApiConnected ? 'data.gov.in.AgmarknetLive' : 'marketDataRepository.getLatestRecord',
           intent,
           cropName: crop,
           mandiName: mandi,
@@ -98,14 +102,15 @@ export class ToolRoutingEngine {
 
       case 'PRICE_PREDICTION': {
         const horizon = (entities.horizonDays === 1 ? 7 : entities.horizonDays || 7) as 7 | 15 | 30 | 60 | 90;
-        const prediction = executeCropMarketForecast({
+        const livePrediction = await this.fetchLiveForecast(crop, mandi, horizon);
+        const prediction = livePrediction || executeCropMarketForecast({
           crop,
           mandi,
           horizonDays: horizon,
         });
 
         return {
-          toolName: 'executeCropMarketForecast',
+          toolName: livePrediction?.liveApiConnected ? 'executeCropMarketForecast(live-data.gov.in)' : 'executeCropMarketForecast',
           intent,
           cropName: crop,
           mandiName: mandi,

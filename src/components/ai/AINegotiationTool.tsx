@@ -74,6 +74,7 @@ export const AINegotiationTool: React.FC = () => {
             platformEscrowFee: Math.round(total * 0.01),
           },
         });
+        setIsArbitrating(false);
         return;
       }
     } catch (e) {

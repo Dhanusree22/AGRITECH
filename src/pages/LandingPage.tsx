@@ -42,6 +42,7 @@ import { useLanguage } from '../context/LanguageContext';
 import { useAuth } from '../context/AuthContext';
 import { useStore } from '../context/StoreContext';
 import { VoiceAssistantModal } from '../components/voice/VoiceAssistantModal';
+import { calculateRealtimePrediction } from '../services/mandiPredictionEngine';
 
 export const LandingPage: React.FC<{ navigate: (path: string) => void }> = ({ navigate }) => {
   const { t, language, languages, currentLanguageConfig, setLanguage } = useLanguage();
@@ -50,10 +51,19 @@ export const LandingPage: React.FC<{ navigate: (path: string) => void }> = ({ na
 
   const [activeAITab, setActiveAITab] = useState<'prediction' | 'grading' | 'negotiation'>('prediction');
   const [voiceOpen, setVoiceOpen] = useState(false);
-  const [selectedMandiCrop, setSelectedMandiCrop] = useState<string>('Tomato (Hybrid)');
+  const [selectedMandiCrop, setSelectedMandiCrop] = useState<string>('Tomato');
 
   // Selected crop details for preview
   const currentMandiItem = mandiPrices.find((m) => m.crop === selectedMandiCrop) || mandiPrices[0];
+  const heroPrediction = calculateRealtimePrediction({
+    crop: currentMandiItem?.crop || 'Tomato',
+    mandi: currentMandiItem?.mandi || 'Kolar APMC Market',
+    todayPrice: currentMandiItem?.pricePerKg,
+    season: 'Current',
+    weatherFactor: 'Optimal',
+    holidayImpact: 'None',
+    horizonDays: 7,
+  });
 
   const handleRoleRoute = (roleTarget: 'farmer' | 'buyer' | 'admin') => {
     if (user && user.role === roleTarget) {
@@ -172,8 +182,10 @@ export const LandingPage: React.FC<{ navigate: (path: string) => void }> = ({ na
                   AgriTech Intelligence Hub &middot; Real-time Preview
                 </span>
                 <p className="text-[11px] text-emerald-200">
-                  Karnataka & National Mandi Observations &bull; Last retrieved:{' '}
-                  <span className="font-semibold text-white">Today 09:30 AM (AGMARKNET Source)</span>
+                  Karnataka & National Mandi Observations &bull; Market date:{' '}
+                  <span className="font-semibold text-white">
+                    {heroPrediction.actualTradingDate || 'Baseline'} ({heroPrediction.liveApiConnected ? 'AGMARKNET Live Source' : 'AGMARKNET Historical Baseline'})
+                  </span>
                 </p>
               </div>
             </div>
@@ -197,13 +209,17 @@ export const LandingPage: React.FC<{ navigate: (path: string) => void }> = ({ na
                   <BarChart3 className="w-4 h-4 text-[#10B981]" /> Live APMC Mandi Rates
                 </h4>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-[#123D2A] font-bold">
-                  Official Feed
+                  {currentMandiItem?.lastUpdated || 'Historical Baseline'}
                 </span>
               </div>
 
-              {/* Crop Selector Pills */}
+              {/* Crop Selector Pills (distinct crops) */}
               <div className="flex flex-wrap gap-1.5">
-                {mandiPrices.slice(0, 5).map((m) => (
+                {Array.from(
+                  new Map<string, (typeof mandiPrices)[number]>(mandiPrices.map((m) => [m.crop, m])).values()
+                )
+                  .slice(0, 5)
+                  .map((m) => (
                   <button
                     key={m.id}
                     onClick={() => setSelectedMandiCrop(m.crop)}
@@ -229,13 +245,13 @@ export const LandingPage: React.FC<{ navigate: (path: string) => void }> = ({ na
                   </div>
                   <span
                     className={`text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${
-                      currentMandiItem.trend === 'up'
+                      currentMandiItem.changePercent >= 0
                         ? 'bg-emerald-100 text-[#123D2A]'
                         : 'bg-rose-100 text-rose-800'
                     }`}
                   >
                     <TrendingUp className="w-3 h-3" />
-                    +{currentMandiItem.changePercent}%
+                    {currentMandiItem.changePercent >= 0 ? '+' : ''}{currentMandiItem.changePercent}%
                   </span>
                 </div>
 
@@ -287,12 +303,14 @@ export const LandingPage: React.FC<{ navigate: (path: string) => void }> = ({ na
                 </span>
               </div>
 
-              {/* Graphical SVG Chart Simulation */}
+              {/* Graphical Live Time-Series Forecast Chart */}
               <div className="p-5 rounded-2xl bg-slate-900 text-white space-y-4 relative overflow-hidden shadow-inner">
                 <div className="flex items-center justify-between text-xs">
                   <div>
                     <span className="text-slate-400 text-[10px] uppercase font-bold block">Model Trajectory</span>
-                    <strong className="text-emerald-400 font-black text-sm">Bullish Uptrend (+12.4%)</strong>
+                    <strong className={`font-black text-sm ${heroPrediction.changePercent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {heroPrediction.trend === 'up' ? 'Bullish Uptrend' : heroPrediction.trend === 'down' ? 'Softening Trend' : 'Balanced Range'} ({heroPrediction.changePercent >= 0 ? '+' : ''}{heroPrediction.changePercent}%)
+                    </strong>
                   </div>
                   <div className="flex items-center gap-3 text-[11px]">
                     <span className="flex items-center gap-1 text-slate-300">
@@ -313,49 +331,44 @@ export const LandingPage: React.FC<{ navigate: (path: string) => void }> = ({ na
                         <stop offset="100%" stopColor="#10B981" stopOpacity="0" />
                       </linearGradient>
                     </defs>
-                    {/* Grid lines */}
                     <line x1="0" y1="30" x2="400" y2="30" stroke="#334155" strokeDasharray="3 3" />
                     <line x1="0" y1="60" x2="400" y2="60" stroke="#334155" strokeDasharray="3 3" />
                     <line x1="0" y1="90" x2="400" y2="90" stroke="#334155" strokeDasharray="3 3" />
 
-                    {/* Historical Area */}
-                    <path
-                      d="M 0,90 Q 50,75 100,82 T 200,55 T 260,42 L 260,120 L 0,120 Z"
-                      fill="url(#chartGrad)"
-                    />
-                    {/* Observed Solid Line */}
-                    <path
-                      d="M 0,90 Q 50,75 100,82 T 200,55 T 260,42"
-                      fill="none"
-                      stroke="#10B981"
-                      strokeWidth="3"
-                    />
-                    {/* Forecast Dashed Line with Uncertainty Cone */}
-                    <path
-                      d="M 260,42 Q 330,28 400,18"
-                      fill="none"
-                      stroke="#F5A623"
-                      strokeWidth="3"
-                      strokeDasharray="4 4"
-                    />
-                    {/* Uncertainty envelope */}
-                    <path
-                      d="M 260,42 L 400,8 L 400,28 L 260,42 Z"
-                      fill="#F5A623"
-                      fillOpacity="0.15"
-                    />
-
-                    {/* Current point */}
-                    <circle cx="260" cy="42" r="5" fill="#C6FF4A" stroke="#123D2A" strokeWidth="2" />
-                    <text x="250" y="32" fill="#C6FF4A" fontSize="9" fontWeight="bold">Today ₹{currentMandiItem.pricePerKg}</text>
-                    <text x="340" y="14" fill="#F5A623" fontSize="9" fontWeight="bold">Day 7 ₹{currentMandiItem.ai7DayForecastPerKg}</text>
+                    {(() => {
+                      const pts = (heroPrediction.forecastPoints || heroPrediction.dailyPoints || []).slice(0, 8);
+                      const vals = pts.map((p) => p.predictedPrice);
+                      const minP = Math.min(...vals, heroPrediction.todayPrice);
+                      const maxP = Math.max(...vals, heroPrediction.todayPrice);
+                      const span = maxP - minP || 1;
+                      const coords = pts.map((pt, i) => ({
+                        x: 20 + (i / Math.max(1, pts.length - 1)) * 360,
+                        y: 95 - ((pt.predictedPrice - minP) / span) * 65,
+                        pt,
+                        i,
+                      }));
+                      const dLine = coords.map((c, i) => `${i === 0 ? 'M' : 'L'} ${c.x},${c.y}`).join(' ');
+                      const dFill = `${dLine} L ${coords[coords.length - 1]?.x || 380},120 L 20,120 Z`;
+                      const lastC = coords[coords.length - 1] || { x: 380, y: 40 };
+                      const firstC = coords[0] || { x: 20, y: 60 };
+                      return (
+                        <>
+                          <path d={dFill} fill="url(#chartGrad)" />
+                          <path d={dLine} fill="none" stroke="#F5A623" strokeWidth="3" strokeDasharray="4 4" />
+                          <circle cx={firstC.x} cy={firstC.y} r="5" fill="#10B981" stroke="#123D2A" strokeWidth="2" />
+                          <circle cx={lastC.x} cy={lastC.y} r="5" fill="#C6FF4A" stroke="#123D2A" strokeWidth="2" />
+                          <text x={firstC.x} y={Math.max(12, firstC.y - 10)} fill="#10B981" fontSize="9" fontWeight="bold">Today ₹{heroPrediction.todayPrice}</text>
+                          <text x={Math.max(240, lastC.x - 45)} y={Math.max(12, lastC.y - 10)} fill="#C6FF4A" fontSize="9" fontWeight="bold">Day 7 ₹{heroPrediction.day7Price}</text>
+                        </>
+                      );
+                    })()}
                   </svg>
                 </div>
 
                 <div className="flex items-center justify-between text-[10px] text-slate-400 border-t border-slate-800 pt-2">
-                  <span>Oct 01 (Past)</span>
-                  <span>Oct 21 (Today)</span>
-                  <span>Nov 05 (Predicted)</span>
+                  <span>{heroPrediction.forecastPoints?.[0]?.dateStr || 'Today'} (Spot)</span>
+                  <span>{heroPrediction.forecastPoints?.[3]?.dateStr || 'Mid'}</span>
+                  <span>{heroPrediction.forecastPoints?.[7]?.dateStr || 'Day 7'} (Target)</span>
                 </div>
               </div>
 
@@ -365,7 +378,9 @@ export const LandingPage: React.FC<{ navigate: (path: string) => void }> = ({ na
                   <Database className="w-3.5 h-3.5 text-[#10B981]" />
                   <span>Data Source: <strong>data.gov.in / Agmarknet API</strong></span>
                 </span>
-                <span className="text-[10px] font-bold text-emerald-800">Verified Mandi Feed</span>
+                <span className="text-[10px] font-bold text-emerald-800">
+                  {heroPrediction.liveApiConnected ? `Live Verified (${heroPrediction.actualTradingDate})` : `Baseline (${heroPrediction.actualTradingDate || 'Cached'})`}
+                </span>
               </div>
             </div>
 
@@ -390,9 +405,7 @@ export const LandingPage: React.FC<{ navigate: (path: string) => void }> = ({ na
                     <span className="font-extrabold text-[#123D2A]">Harvest Advisory:</span>
                   </div>
                   <p className="text-[#18251E]/80 leading-relaxed text-[11px]">
-                    "{currentMandiItem.crop} modal rates in {currentMandiItem.mandi} are projected to reach ₹
-                    {currentMandiItem.ai7DayForecastPerKg}/kg by weekend due to rainfall disruptions in neighboring districts.
-                    <strong> Recommended action:</strong> Stage lot listing for Wednesday morning auction."
+                    {heroPrediction.actionAdvice} <strong>Optimal window:</strong> {heroPrediction.bestSellingWindow}.
                   </p>
                   <div className="text-[10px] text-[#10B981] font-bold flex items-center gap-1 pt-1">
                     <CheckCircle className="w-3 h-3" /> Grounded on real mandi historicals

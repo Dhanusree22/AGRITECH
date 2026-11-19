@@ -7,6 +7,8 @@ import {
   marketDataRepository,
   CROP_MASTER_LIST,
   SUPPORTED_MANDIS,
+  resolveCanonicalCropName,
+  resolveCanonicalMandi,
   MarketPriceRecord,
   CropMasterDefinition,
   MandiMetadata,
@@ -23,6 +25,8 @@ export {
   marketDataRepository,
   CROP_MASTER_LIST,
   SUPPORTED_MANDIS,
+  resolveCanonicalCropName,
+  resolveCanonicalMandi,
   executeCropMarketForecast,
 };
 export type {
@@ -97,8 +101,8 @@ export interface PredictionRequest {
   state?: string;
   todayPrice?: number;
   season?: 'Kharif' | 'Rabi' | 'Zaid' | 'Current';
-  weatherFactor?: 'Optimal' | 'Unseasonal Rain' | 'Heatwave' | 'Monsoon Delay';
-  holidayImpact?: 'None' | 'Diwali / Dussehra Surge' | 'Navratri Vegetarian Spike' | 'Wedding Season Peak' | 'Mandi Weekend Closure';
+  weatherFactor?: 'Optimal' | 'Optimal Clear Weather' | 'Unseasonal Rain' | 'Heatwave' | 'Monsoon Delay';
+  holidayImpact?: 'None' | 'Standard Market Days' | 'Diwali / Dussehra Surge' | 'Navratri Vegetarian Spike' | 'Wedding Season Peak' | 'Mandi Weekend Closure';
   horizon?: '7days' | '14days' | '15days' | '30days' | '60days' | '90days';
   horizonDays?: 7 | 15 | 30 | 60 | 90;
   language?: LanguageCode;
@@ -108,6 +112,15 @@ export interface PredictionResult {
   crop: string;
   mandi: string;
   state: string;
+  district?: string;
+  variety?: string;
+  grade?: string;
+  predictionAvailable?: boolean;
+  unavailableReason?: string;
+  dataQuality?: 'LIVE_API' | 'HISTORICAL_BASELINE' | 'UNAVAILABLE';
+  minPriceQuintal?: number;
+  maxPriceQuintal?: number;
+  modalPriceQuintal?: number;
   todayPrice: number;
   tomorrowPrice: number;
   day7Price: number;
@@ -121,6 +134,8 @@ export interface PredictionResult {
   bestSellingWindow: string;
   actionAdvice: string;
   agmarknetGrounded: boolean;
+  liveApiConnected?: boolean;
+  dataSource?: string;
   lastRetrieved: string;
   actualTradingDate?: string;
   apiRetrievalTime?: string;
@@ -136,6 +151,7 @@ export interface PredictionResult {
     currentPrice: number;
     predictedPrice: number;
     spreadVsCurrent: number;
+    isLiveApi?: boolean;
   }>;
 }
 
@@ -164,6 +180,15 @@ export function calculateRealtimePrediction(params: PredictionRequest): Predicti
     crop: mlResult.crop,
     mandi: mlResult.mandi,
     state: mlResult.state,
+    district: mlResult.district,
+    variety: mlResult.variety,
+    grade: mlResult.grade,
+    predictionAvailable: mlResult.predictionAvailable,
+    unavailableReason: mlResult.unavailableReason,
+    dataQuality: mlResult.dataQuality,
+    minPriceQuintal: mlResult.minPriceQuintal,
+    maxPriceQuintal: mlResult.maxPriceQuintal,
+    modalPriceQuintal: mlResult.modalPriceQuintal,
     todayPrice: mlResult.todayPrice,
     tomorrowPrice: mlResult.tomorrowPrice,
     day7Price: mlResult.day7Price,
@@ -176,8 +201,10 @@ export function calculateRealtimePrediction(params: PredictionRequest): Predicti
     influencingFactors: mlResult.influencingFactors,
     bestSellingWindow: mlResult.bestSellingWindow,
     actionAdvice: mlResult.actionAdvice,
-    agmarknetGrounded: true,
-    lastRetrieved: `Trading Session: ${mlResult.actualTradingDate} · Synced at 10:00 AM IST`,
+    agmarknetGrounded: mlResult.agmarknetGrounded,
+    liveApiConnected: mlResult.liveApiConnected,
+    dataSource: mlResult.dataSource,
+    lastRetrieved: mlResult.lastSuccessfulSync,
     actualTradingDate: mlResult.actualTradingDate,
     apiRetrievalTime: mlResult.apiRetrievalTime,
     season: mlResult.season,
@@ -189,15 +216,23 @@ export function calculateRealtimePrediction(params: PredictionRequest): Predicti
   };
 }
 
-// Generate authentic MandiPriceItem list from historical repository
+// Generate authentic MandiPriceItem list from live/historical repository across each crop's benchmark + major mandis
 export function getLiveMandiPricesList(): MandiPriceItem[] {
   const list: MandiPriceItem[] = [];
   let index = 1;
+  const seenPairs = new Set<string>();
 
   for (const cropDef of CROP_MASTER_LIST) {
-    const mandisForCrop = SUPPORTED_MANDIS.slice(0, 4);
+    // Include crop's actual national benchmark mandi + major regional hubs (so every crop displays its true benchmark hub first)
+    const benchmarkMeta = SUPPORTED_MANDIS.find((m) => m.mandi === cropDef.benchmarkMandi) || SUPPORTED_MANDIS[0];
+    const extraHubs = SUPPORTED_MANDIS.filter((m) => m.mandi !== benchmarkMeta.mandi).slice(0, 2);
+    const mandisForCrop = [benchmarkMeta, ...extraHubs];
 
     for (const mandiMeta of mandisForCrop) {
+      const pairKey = `${cropDef.name}::${mandiMeta.mandi}`;
+      if (seenPairs.has(pairKey)) continue;
+      seenPairs.add(pairKey);
+
       const rec = marketDataRepository.getLatestRecord(cropDef.name, mandiMeta.mandi);
       const modal = rec ? rec.modalPrice : cropDef.baseModalPriceQuintal;
       const min = rec ? rec.minPrice : Math.round(modal * 0.9);
@@ -205,11 +240,16 @@ export function getLiveMandiPricesList(): MandiPriceItem[] {
       const pricePerKg = rec ? rec.pricePerKg : +(modal / 100).toFixed(1);
       const arrivalTons = rec ? rec.arrivalTons : 280;
 
+      // Use realistic neutral baseline covariates per crop rather than identical holiday surge on all cards
       const prediction = calculateRealtimePrediction({
         crop: cropDef.name,
         mandi: mandiMeta.mandi,
         state: mandiMeta.state,
         todayPrice: pricePerKg,
+        season: 'Current',
+        weatherFactor: 'Optimal',
+        holidayImpact: 'None',
+        horizonDays: 30,
       });
 
       list.push({
@@ -224,13 +264,13 @@ export function getLiveMandiPricesList(): MandiPriceItem[] {
         changePercent: prediction.changePercent,
         arrivalTons,
         trend: prediction.trend,
-        lastUpdated: '10 mins ago',
+        lastUpdated: rec?.dataQuality === 'VERIFIED_OFFICIAL' ? `Live (${rec.tradingDate})` : `Historical (${rec?.tradingDate || 'Baseline'})`,
         ai7DayForecastPerKg: prediction.day7Price,
         ai30DayForecastPerKg: prediction.day30Price || +(pricePerKg * (1 + prediction.changePercent / 80)).toFixed(1),
         confidence: prediction.confidenceScore,
         season: cropDef.seasonPeak,
-        weatherFactor: 'Verified Agmarknet Sync',
-        holidayImpact: 'Active Model',
+        weatherFactor: rec?.dataQuality === 'VERIFIED_OFFICIAL' ? 'data.gov.in Live Feed' : 'Agmarknet Historical Baseline',
+        holidayImpact: prediction.recommendation?.verdict.replace(/_/g, ' ') || 'Active Model',
       });
     }
   }
@@ -240,10 +280,11 @@ export function getLiveMandiPricesList(): MandiPriceItem[] {
 
 // Agmarknet integration configuration status
 export const DEFAULT_AGMARKNET_CONFIG: AgmarknetSyncConfig = {
-  apiKey: 'DEMO-DATA-GOV-IN-AGRI-2026',
+  apiKey: 'SERVER-CONFIGURED',
   source: 'data.gov.in (Agmarknet)',
   lastSyncedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' Today',
   status: 'Connected',
-  totalRecordsLoaded: 48,
+  totalRecordsLoaded: 42,
   resourceId: '9ef84268-d588-465a-a308-a864a43d0070',
 };
+

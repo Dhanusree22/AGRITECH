@@ -56,6 +56,14 @@ import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { useStore } from '../../context/StoreContext';
 import { LanguageSelector } from '../../components/common/LanguageSelector';
+import { AIPricePredictionTool } from '../../components/ai/AIPricePredictionTool';
+import {
+  calculateRealtimePrediction,
+  CROP_MASTER_LIST,
+  SUPPORTED_MANDIS,
+  resolveCanonicalCropName,
+  resolveCanonicalMandi,
+} from '../../services/mandiPredictionEngine';
 
 // Mock Platform Recharts Data
 const platformGrowthData = [
@@ -92,6 +100,8 @@ export const AdminDashboard: React.FC<{ navigate: (path: string) => void; initia
     resolveDispute,
     mandiPrices = [],
     advisoryAlerts = [],
+    agmarknetConfig,
+    syncAgmarknet,
   } = useStore();
 
   const [activeTab, setActiveTab] = useState(initialTab);
@@ -100,6 +110,76 @@ export const AdminDashboard: React.FC<{ navigate: (path: string) => void; initia
   const [resolutionNotes, setResolutionNotes] = useState('');
   const [emergencyAlertText, setEmergencyAlertText] = useState('');
   const [broadcastSeverity, setBroadcastSeverity] = useState<'Warning' | 'Urgent' | 'Info'>('Warning');
+  const [adminForecastCrop, setAdminForecastCrop] = useState('Tomato');
+  const [adminForecastMandi, setAdminForecastMandi] = useState('Kolar APMC Market');
+  const [adminCropsList, setAdminCropsList] = useState<string[]>(() => CROP_MASTER_LIST.map((c) => c.name));
+  const [adminMandisList, setAdminMandisList] = useState<string[]>(() => SUPPORTED_MANDIS.map((m) => m.mandi));
+  const [adminOverviewForecast, setAdminOverviewForecast] = useState(() =>
+    calculateRealtimePrediction({
+      crop: 'Tomato',
+      mandi: 'Kolar APMC Market',
+      season: 'Current',
+      weatherFactor: 'Optimal',
+      holidayImpact: 'None',
+      horizonDays: 7,
+    })
+  );
+  const [analyticsSearch, setAnalyticsSearch] = useState('');
+  const [adminSyncing, setAdminSyncing] = useState(false);
+
+  React.useEffect(() => {
+    let mounted = true;
+    fetch('/api/predictions/crops')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!mounted || !data) return;
+        if (Array.isArray(data.crops) && data.crops.length > 0) {
+          setAdminCropsList(data.crops.map((c: any) => c.name));
+        }
+        if (Array.isArray(data.mandis) && data.mandis.length > 0) {
+          setAdminMandisList(data.mandis.map((m: any) => m.mandi));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [agmarknetConfig.lastSyncedAt]);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    const canonicalCrop = resolveCanonicalCropName(adminForecastCrop);
+    const canonicalMandi = resolveCanonicalMandi(adminForecastMandi)?.mandi || adminForecastMandi;
+    setAdminOverviewForecast(
+      calculateRealtimePrediction({
+        crop: canonicalCrop,
+        mandi: canonicalMandi,
+        season: 'Current',
+        weatherFactor: 'Optimal',
+        holidayImpact: 'None',
+        horizonDays: 7,
+      })
+    );
+    const qs = new URLSearchParams({
+      crop: canonicalCrop,
+      mandi: canonicalMandi,
+      days: '7',
+      season: 'Current',
+      weather: 'Optimal',
+      holiday: 'None',
+    });
+    fetch(`/api/predictions/forecast?${qs.toString()}`, { signal: controller.signal })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!controller.signal.aborted && data?.forecast) {
+          setAdminOverviewForecast(data.forecast);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      controller.abort();
+    };
+  }, [adminForecastCrop, adminForecastMandi, agmarknetConfig.lastSyncedAt]);
 
   // Platform Commission Setting State
   const [platformCommission, setPlatformCommission] = useState(1.2);
@@ -438,6 +518,108 @@ export const AdminDashboard: React.FC<{ navigate: (path: string) => void; initia
                   </div>
                 </div>
               </div>
+
+              {/* National APMC AI Price Forecast Monitor */}
+              <div className="p-6 rounded-3xl bg-slate-900 text-white shadow-xl space-y-4">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-purple-300">
+                      {adminOverviewForecast.liveApiConnected
+                        ? `Live data.gov.in Verified · ${adminOverviewForecast.actualTradingDate || 'Today'}`
+                        : `AGMARKNET Historical Baseline · ${adminOverviewForecast.actualTradingDate || 'Baseline'}`}
+                    </span>
+                    <h3 className="text-base font-black text-white flex items-center gap-2">
+                      <BarChart3 className="w-4 h-4 text-purple-300" /> {adminOverviewForecast.crop} &bull; {adminOverviewForecast.mandi} AI Price Monitor
+                    </h3>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <select
+                      value={adminForecastCrop}
+                      onChange={(e) => setAdminForecastCrop(e.target.value)}
+                      className="px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-bold text-xs outline-none"
+                    >
+                      {Array.from(new Set([...adminCropsList, adminForecastCrop])).map((cropName) => (
+                        <option key={cropName} value={cropName}>{cropName}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={adminForecastMandi}
+                      onChange={(e) => setAdminForecastMandi(e.target.value)}
+                      className="px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-bold text-xs outline-none"
+                    >
+                      {Array.from(new Set([...adminMandisList, adminForecastMandi])).map((mandiName) => (
+                        <option key={mandiName} value={mandiName}>{mandiName}</option>
+                      ))}
+                    </select>
+                    <span
+                      className={`px-3 py-1.5 rounded-full font-bold ${
+                        adminOverviewForecast.changePercent >= 0
+                          ? 'bg-emerald-500/20 text-emerald-300'
+                          : 'bg-rose-500/20 text-rose-300'
+                      }`}
+                    >
+                      {adminOverviewForecast.changePercent >= 0 ? '+' : ''}
+                      {adminOverviewForecast.changePercent}%
+                    </span>
+                    <button
+                      onClick={() => {
+                        setActiveTab('analytics');
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-purple-400 text-slate-950 font-extrabold text-xs cursor-pointer hover:opacity-90"
+                    >
+                      Open Full Forecaster &rarr;
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="p-3 rounded-2xl bg-slate-800/80 border border-slate-700/80">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Actual Modal ({adminOverviewForecast.actualTradingDate || 'Date'})</span>
+                    <span className="text-lg font-black text-white">₹{adminOverviewForecast.todayPrice}/kg</span>
+                    <span className="text-[10px] text-slate-400 block">₹{adminOverviewForecast.modalPriceQuintal || Math.round(adminOverviewForecast.todayPrice * 100)}/Qtl</span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-slate-800/80 border border-slate-700/80">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">AI Tomorrow</span>
+                    <span className="text-lg font-black text-purple-300">₹{adminOverviewForecast.tomorrowPrice}/kg</span>
+                    <span className="text-[10px] text-slate-400 block">₹{Math.round(adminOverviewForecast.tomorrowPrice * 100)}/Qtl</span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-slate-800/80 border border-slate-700/80">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">AI 7-Day Target</span>
+                    <span className="text-lg font-black text-cyan-300">₹{adminOverviewForecast.day7Price}/kg</span>
+                    <span className="text-[10px] text-slate-400 block">₹{Math.round(adminOverviewForecast.day7Price * 100)}/Qtl</span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-slate-800/80 border border-slate-700/80">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Confidence</span>
+                    <span className="text-lg font-black text-emerald-300">{adminOverviewForecast.confidenceScore}%</span>
+                  </div>
+                </div>
+
+                <div className="h-56 w-full pt-1">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart
+                      data={(adminOverviewForecast.forecastPoints || []).slice(0, 7).map((pt, idx) => ({
+                        day: idx === 0 ? `Today (${pt.dateStr})` : pt.dateStr,
+                        forecast: pt.predictedPrice,
+                        upper: pt.maxRange,
+                        lower: pt.minRange,
+                      }))}
+                      margin={{ top: 10, right: 10, left: -10, bottom: 0 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                      <XAxis dataKey="day" stroke="#94a3b8" tick={{ fontSize: 10 }} />
+                      <YAxis stroke="#94a3b8" tick={{ fontSize: 10 }} unit="₹" domain={['auto', 'auto']} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px', fontSize: '11px' }}
+                      />
+                      <Legend wrapperStyle={{ fontSize: '11px' }} />
+                      <Line type="monotone" dataKey="forecast" stroke="#C084FC" strokeWidth={3} dot={{ r: 4 }} name="AI Price Trajectory (₹/kg)" />
+                      <Line type="monotone" dataKey="upper" stroke="#64748b" strokeWidth={1} strokeDasharray="2 2" dot={false} name="Upper Band" />
+                      <Line type="monotone" dataKey="lower" stroke="#64748b" strokeWidth={1} strokeDasharray="2 2" dot={false} name="Lower Band" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
             </div>
           )}
 
@@ -670,33 +852,94 @@ export const AdminDashboard: React.FC<{ navigate: (path: string) => void; initia
           )}
 
           {/* ===================================================================
-              8. AGRICULTURAL ANALYTICS
+              8. AGRICULTURAL ANALYTICS (Live data.gov.in + Admin AI Prediction Monitor)
              =================================================================== */}
           {activeTab === 'analytics' && (
-            <div className="space-y-6">
-              <div className="p-6 rounded-3xl bg-white/85 backdrop-blur-xl border border-white/80 shadow-xl space-y-4">
-                <h2 className="text-xl font-black text-purple-950 flex items-center gap-2">
-                  <BarChart3 className="w-5 h-5 text-purple-700" /> National Agricultural Price Analytics
-                </h2>
-                <p className="text-xs text-purple-950/70">
-                  Real-time arrival volumes, mandi price spread, and cross-state price disparity indexes.
-                </p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4">
-                  <div className="p-4 rounded-2xl bg-purple-50/70 border border-purple-200">
-                    <span className="text-[10px] font-bold uppercase text-purple-800 block">Kolar Hybrid Tomato</span>
-                    <div className="text-2xl font-black text-purple-950 mt-1">₹32/kg</div>
-                    <p className="text-[11px] text-gray-500">Spread vs Delhi: +₹9/kg arbitrage</p>
+            <div className="space-y-8">
+              {/* Interactive Admin AI Price Forecasting Inspector */}
+              <AIPricePredictionTool
+                mode="admin"
+                defaultCrop={adminForecastCrop}
+                defaultMandi={adminForecastMandi}
+              />
+
+              <div className="p-6 rounded-3xl bg-white/85 backdrop-blur-xl border border-white/80 shadow-xl space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-xl font-black text-purple-950 flex items-center gap-2">
+                      <BarChart3 className="w-5 h-5 text-purple-700" /> National Agricultural Price Analytics (Live Feed)
+                    </h2>
+                    <p className="text-xs text-purple-950/70">
+                      Real-time arrival volumes, mandi price spread, and cross-state forecast targets from data.gov.in.
+                    </p>
                   </div>
-                  <div className="p-4 rounded-2xl bg-purple-50/70 border border-purple-200">
-                    <span className="text-[10px] font-bold uppercase text-purple-800 block">Nashik Red Onion</span>
-                    <div className="text-2xl font-black text-purple-950 mt-1">₹28/kg</div>
-                    <p className="text-[11px] text-gray-500">Arrivals up 14% this morning</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="Filter crop, mandi, state..."
+                      value={analyticsSearch}
+                      onChange={(e) => setAnalyticsSearch(e.target.value)}
+                      className="px-3.5 py-1.5 rounded-full bg-white border border-purple-950/15 text-xs font-semibold outline-none focus:border-purple-700"
+                    />
+                    <button
+                      onClick={async () => {
+                        setAdminSyncing(true);
+                        await syncAgmarknet();
+                        setAdminSyncing(false);
+                      }}
+                      disabled={adminSyncing}
+                      className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-[#581c87] text-white text-xs font-bold cursor-pointer disabled:opacity-60"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${adminSyncing ? 'animate-spin' : ''}`} />
+                      <span>{adminSyncing ? 'Syncing...' : 'Sync data.gov.in'}</span>
+                    </button>
                   </div>
-                  <div className="p-4 rounded-2xl bg-purple-50/70 border border-purple-200">
-                    <span className="text-[10px] font-bold uppercase text-purple-800 block">Mandya Sona Masoori</span>
-                    <div className="text-2xl font-black text-purple-950 mt-1">₹58/kg</div>
-                    <p className="text-[11px] text-gray-500">Stable demand profile</p>
-                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-2">
+                  {(mandiPrices || [])
+                    .filter(
+                      (m) =>
+                        !analyticsSearch.trim() ||
+                        m.crop.toLowerCase().includes(analyticsSearch.toLowerCase()) ||
+                        m.mandi.toLowerCase().includes(analyticsSearch.toLowerCase()) ||
+                        m.state.toLowerCase().includes(analyticsSearch.toLowerCase())
+                    )
+                    .slice(0, 9)
+                    .map((m) => (
+                      <div key={m.id} className="p-4 rounded-2xl bg-purple-50/70 border border-purple-200 space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <span className="text-[11px] font-black uppercase text-purple-900 block">{m.crop}</span>
+                            <span className="text-[10px] text-purple-900/70">{m.mandi} ({m.state})</span>
+                          </div>
+                          <span
+                            className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                              m.changePercent >= 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                            }`}
+                          >
+                            {m.changePercent >= 0 ? '+' : ''}{m.changePercent}%
+                          </span>
+                        </div>
+                        <div className="flex items-baseline justify-between">
+                          <div className="text-2xl font-black text-purple-950">₹{m.pricePerKg}/kg</div>
+                          <div className="text-xs font-bold text-purple-800">7d AI: ₹{m.ai7DayForecastPerKg}/kg</div>
+                        </div>
+                        <p className="text-[11px] text-gray-600">
+                          Arrivals: {m.arrivalTons} MT &bull; Modal: ₹{m.modalPrice}/Qtl
+                        </p>
+                        <button
+                          onClick={() => {
+                            setAdminForecastCrop(m.crop);
+                            setAdminForecastMandi(m.mandi);
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          }}
+                          className="w-full py-1.5 rounded-xl bg-white hover:bg-purple-100 text-purple-950 font-bold text-[11px] border border-purple-200 cursor-pointer"
+                        >
+                          Audit Forecast Model &rarr;
+                        </button>
+                      </div>
+                    ))}
                 </div>
               </div>
             </div>
@@ -708,13 +951,27 @@ export const AdminDashboard: React.FC<{ navigate: (path: string) => void; initia
           {(activeTab === 'ai-health' || activeTab === 'api-monitor') && (
             <div className="space-y-6">
               <div className="p-6 rounded-3xl bg-white/85 backdrop-blur-xl border border-white/80 shadow-xl space-y-6">
-                <div>
-                  <h2 className="text-xl font-black text-purple-950 flex items-center gap-2">
-                    <Cpu className="w-5 h-5 text-purple-700" /> AI &amp; External API Health Telemetry
-                  </h2>
-                  <p className="text-xs text-purple-950/70 mt-1">
-                    Continuous uptime monitoring across Google Gemini, Agmarknet API, Open-Meteo, and Sentinel Hub.
-                  </p>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-black text-purple-950 flex items-center gap-2">
+                      <Cpu className="w-5 h-5 text-purple-700" /> AI &amp; External API Health Telemetry
+                    </h2>
+                    <p className="text-xs text-purple-950/70 mt-1">
+                      Continuous uptime monitoring across Google Gemini, data.gov.in Agmarknet API, Open-Meteo, and Sentinel Hub.
+                    </p>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      setAdminSyncing(true);
+                      await syncAgmarknet();
+                      setAdminSyncing(false);
+                    }}
+                    disabled={adminSyncing}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-[#581c87] text-white text-xs font-bold cursor-pointer disabled:opacity-60"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${adminSyncing ? 'animate-spin' : ''}`} />
+                    <span>{adminSyncing ? 'Syncing Feed...' : 'Sync data.gov.in Live Feed'}</span>
+                  </button>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -723,8 +980,8 @@ export const AdminDashboard: React.FC<{ navigate: (path: string) => void; initia
                       <span className="font-bold text-xs text-purple-950">Agmarknet / data.gov.in</span>
                       <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
                     </div>
-                    <div className="text-xl font-black text-purple-950">99.8% Online</div>
-                    <p className="text-[10px] text-gray-500">Latency: 190ms &bull; 48 Mandis</p>
+                    <div className="text-xl font-black text-purple-950">{agmarknetConfig.status}</div>
+                    <p className="text-[10px] text-gray-500">{agmarknetConfig.totalRecordsLoaded} Records &bull; {agmarknetConfig.lastSyncedAt}</p>
                   </div>
 
                   <div className="p-5 rounded-2xl bg-white border border-purple-950/15 space-y-2">

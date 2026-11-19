@@ -29,11 +29,15 @@ interface LanguageContextType {
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
-// Store original English texts for DOM nodes to avoid lossy double-translations
-const nodeOriginalTextMap = new WeakMap<Node, string>();
-const elementOriginalPlaceholders = new WeakMap<Element, string>();
-const elementOriginalTitles = new WeakMap<Element, string>();
-const elementOriginalAriaLabels = new WeakMap<Element, string>();
+// Store original English and last-applied strings per DOM node/element to avoid reverting React state updates
+interface NodeTrack {
+  original: string;
+  lastApplied: string;
+}
+
+const nodeTrackMap = new WeakMap<Node, NodeTrack>();
+const optionTrackMap = new WeakMap<HTMLOptionElement, NodeTrack>();
+const attrTrackMap = new WeakMap<Element, Record<string, NodeTrack>>();
 
 export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [language, setLanguageState] = useState<LanguageCode>(() => {
@@ -331,6 +335,53 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     if (typeof window === 'undefined') return;
 
+    const applyTrackedUpdate = (
+      currentVal: string,
+      track: NodeTrack | undefined,
+      saveTrack: (next: NodeTrack) => void,
+      writeDom: (val: string) => void
+    ) => {
+      if (!track) {
+        if (language === 'en') {
+          saveTrack({ original: currentVal, lastApplied: currentVal });
+          return;
+        }
+        const translated = translateString(currentVal);
+        saveTrack({ original: currentVal, lastApplied: translated });
+        if (translated !== currentVal) {
+          writeDom(translated);
+        }
+        return;
+      }
+
+      // If DOM changed away from what LanguageContext last applied, React updated it (including pure numbers, currency, % or dates)
+      if (currentVal !== track.lastApplied) {
+        if (language === 'en') {
+          saveTrack({ original: currentVal, lastApplied: currentVal });
+          return;
+        }
+        const translated = translateString(currentVal);
+        saveTrack({ original: currentVal, lastApplied: translated });
+        if (translated !== currentVal) {
+          writeDom(translated);
+        }
+        return;
+      }
+
+      if (language === 'en') {
+        if (currentVal !== track.original) {
+          saveTrack({ original: track.original, lastApplied: track.original });
+          writeDom(track.original);
+        }
+      } else {
+        const translated = translateString(track.original);
+        if (translated !== currentVal) {
+          saveTrack({ original: track.original, lastApplied: translated });
+          writeDom(translated);
+        }
+      }
+    };
+
     const processNode = (node: Node) => {
       const parent = node.parentElement;
       if (
@@ -346,97 +397,46 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return;
       }
 
-      // Text Nodes
+      // Text Nodes (including dynamic numbers, prices, dates, percentages, and <option> labels)
       if (node.nodeType === Node.TEXT_NODE) {
-        let original = nodeOriginalTextMap.get(node);
-        if (original === undefined) {
-          original = node.nodeValue || '';
-          nodeOriginalTextMap.set(node, original);
-        } else {
-          // If the nodeValue changed dynamically by React and contains English
-          const currentTrans = language === 'en' ? original : translateString(original);
-          if (
-            node.nodeValue !== currentTrans &&
-            node.nodeValue !== original &&
-            node.nodeValue &&
-            node.nodeValue.trim().length > 0 &&
-            /[A-Za-z]/.test(node.nodeValue)
-          ) {
-            original = node.nodeValue;
-            nodeOriginalTextMap.set(node, original);
+        const currentText = node.nodeValue || '';
+        applyTrackedUpdate(
+          currentText,
+          nodeTrackMap.get(node),
+          (next) => nodeTrackMap.set(node, next),
+          (val) => {
+            node.nodeValue = val;
           }
-        }
-
-        if (language === 'en') {
-          if (node.nodeValue !== original) {
-            node.nodeValue = original;
-          }
-        } else {
-          const translated = translateString(original);
-          if (translated !== node.nodeValue) {
-            node.nodeValue = translated;
-          }
-        }
+        );
+        return;
       }
 
-      // Element Attributes (placeholders, titles, option values)
+      // Element Attributes (placeholders, titles, aria-labels, button input values)
       if (node.nodeType === Node.ELEMENT_NODE) {
         const el = node as HTMLElement;
+        let attrTracks = attrTrackMap.get(el);
+        const getAttrTracks = () => {
+          if (!attrTracks) {
+            attrTracks = {};
+            attrTrackMap.set(el, attrTracks);
+          }
+          return attrTracks;
+        };
 
-        // Placeholders
-        if (el.hasAttribute('placeholder')) {
-          let origPlaceholder = elementOriginalPlaceholders.get(el);
-          if (origPlaceholder === undefined) {
-            origPlaceholder = el.getAttribute('placeholder') || '';
-            elementOriginalPlaceholders.set(el, origPlaceholder);
-          }
-          if (language === 'en') {
-            if (el.getAttribute('placeholder') !== origPlaceholder) {
-              el.setAttribute('placeholder', origPlaceholder);
-            }
-          } else {
-            const trans = translateString(origPlaceholder);
-            if (el.getAttribute('placeholder') !== trans) {
-              el.setAttribute('placeholder', trans);
-            }
-          }
-        }
-
-        // Titles
-        if (el.hasAttribute('title')) {
-          let origTitle = elementOriginalTitles.get(el);
-          if (origTitle === undefined) {
-            origTitle = el.getAttribute('title') || '';
-            elementOriginalTitles.set(el, origTitle);
-          }
-          if (language === 'en') {
-            if (el.getAttribute('title') !== origTitle) {
-              el.setAttribute('title', origTitle);
-            }
-          } else {
-            const trans = translateString(origTitle);
-            if (el.getAttribute('title') !== trans) {
-              el.setAttribute('title', trans);
-            }
-          }
-        }
-
-        // Aria Labels
-        if (el.hasAttribute('aria-label')) {
-          let origAria = elementOriginalAriaLabels.get(el);
-          if (origAria === undefined) {
-            origAria = el.getAttribute('aria-label') || '';
-            elementOriginalAriaLabels.set(el, origAria);
-          }
-          if (language === 'en') {
-            if (el.getAttribute('aria-label') !== origAria) {
-              el.setAttribute('aria-label', origAria);
-            }
-          } else {
-            const trans = translateString(origAria);
-            if (el.getAttribute('aria-label') !== trans) {
-              el.setAttribute('aria-label', trans);
-            }
+        for (const attrName of ['placeholder', 'title', 'aria-label'] as const) {
+          if (el.hasAttribute(attrName)) {
+            const currentAttr = el.getAttribute(attrName) || '';
+            const store = getAttrTracks();
+            applyTrackedUpdate(
+              currentAttr,
+              store[attrName],
+              (next) => {
+                store[attrName] = next;
+              },
+              (val) => {
+                el.setAttribute(attrName, val);
+              }
+            );
           }
         }
 
@@ -448,32 +448,32 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const inputEl = el as HTMLInputElement;
           const val = inputEl.value;
           if (val) {
-            if (language === 'en') {
-              // preserve
-            } else {
-              const trans = translateString(val);
-              if (trans !== val) {
-                inputEl.value = trans;
+            const store = getAttrTracks();
+            applyTrackedUpdate(
+              val,
+              store.value,
+              (next) => {
+                store.value = next;
+              },
+              (nextVal) => {
+                inputEl.value = nextVal;
               }
-            }
+            );
           }
         }
 
-        // Option elements inside <select>
+        // Keep track record consistent for Option elements without clobbering React's child Text node
         if (el.tagName === 'OPTION') {
           const opt = el as HTMLOptionElement;
-          let origOptText = nodeOriginalTextMap.get(opt);
-          if (origOptText === undefined) {
-            origOptText = opt.text || opt.innerText || '';
-            nodeOriginalTextMap.set(opt, origOptText);
-          }
-          if (language === 'en') {
-            if (opt.text !== origOptText) opt.text = origOptText;
-          } else {
-            const trans = translateString(origOptText);
-            if (opt.text !== trans) {
-              opt.text = trans;
-            }
+          if (opt.childNodes.length === 0 && opt.text) {
+            applyTrackedUpdate(
+              opt.text,
+              optionTrackMap.get(opt),
+              (next) => optionTrackMap.set(opt, next),
+              (val) => {
+                opt.text = val;
+              }
+            );
           }
         }
       }

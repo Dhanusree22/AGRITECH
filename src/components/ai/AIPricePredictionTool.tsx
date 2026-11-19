@@ -1,169 +1,277 @@
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Sparkles,
   TrendingUp,
   TrendingDown,
   Calendar,
-  AlertCircle,
   RefreshCw,
-  Layers,
   CheckCircle2,
-  ChevronRight,
   Database,
   CloudSun,
   ShieldCheck,
-  Key,
-  Sliders,
-  DollarSign,
-  ArrowRight,
-  Info,
-  ExternalLink,
   MapPin,
   Clock,
   Award,
   Truck,
-  Scale,
-  Activity,
-  BarChart3,
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useStore } from '../../context/StoreContext';
 import {
   calculateRealtimePrediction,
-  CROP_PROFILES,
-  REGIONAL_MANDIS,
   CROP_MASTER_LIST,
   SUPPORTED_MANDIS,
   PredictionResult,
+  MandiMetadata,
 } from '../../services/mandiPredictionEngine';
+import {
+  resolveCanonicalCropName,
+  resolveCanonicalMandi,
+} from '../../services/marketData/historicalMarketDatabase';
 import { DailyForecastPoint } from '../../types';
 
-export const AIPricePredictionTool: React.FC = () => {
+export interface AIPricePredictionToolProps {
+  defaultCrop?: string;
+  defaultMandi?: string;
+  mode?: 'farmer' | 'buyer' | 'admin' | 'public';
+}
+
+export const AIPricePredictionTool: React.FC<AIPricePredictionToolProps> = ({
+  defaultCrop,
+  defaultMandi,
+  mode = 'farmer',
+}) => {
   const { t, language } = useLanguage();
   const { agmarknetConfig, syncAgmarknet } = useStore();
 
-  // Selected crop, region, and parameters
-  const [selectedCrop, setSelectedCrop] = useState<string>('Tomato');
-  const [selectedMandi, setSelectedMandi] = useState<string>('Kolar APMC Market');
-  const [customTodayPrice, setCustomTodayPrice] = useState<number>(32);
-  const [selectedHorizon, setSelectedHorizon] = useState<7 | 15 | 30 | 60 | 90>(30);
-  const [selectedSeason, setSelectedSeason] = useState<'Kharif' | 'Rabi' | 'Zaid' | 'Current'>('Current');
-  const [selectedWeather, setSelectedWeather] = useState<'Unseasonal Rain' | 'Heatwave' | 'Monsoon Delay' | 'Optimal'>('Unseasonal Rain');
-  const [selectedHoliday, setSelectedHoliday] = useState<'Diwali / Dussehra Surge' | 'Navratri Vegetarian Spike' | 'Wedding Season Peak' | 'Mandi Weekend Closure' | 'None'>('Diwali / Dussehra Surge');
+  const initialCrop = resolveCanonicalCropName(defaultCrop || 'Tomato');
+  const initialMandi = resolveCanonicalMandi(defaultMandi || 'Kolar APMC Market')?.mandi || defaultMandi || 'Kolar APMC Market';
 
-  // Active day selection in the calendar forecast
-  const [activeDayIndex, setActiveDayIndex] = useState<number>(1); // default to Tomorrow (Day 1)
-  const [activeTab, setActiveTab] = useState<'forecast' | 'crossMandi' | 'performance'>('forecast');
-  const [loading, setLoading] = useState<boolean>(false);
-  const [apiKeyModalOpen, setApiKeyModalOpen] = useState<boolean>(false);
-  const [apiKeyInput, setApiKeyInput] = useState<string>(agmarknetConfig.apiKey || 'DEMO-DATA-GOV-IN-AGRI-2026');
-  const [syncStatusMsg, setSyncStatusMsg] = useState<string>('');
-
-  // Prediction calculation result
-  const [prediction, setPrediction] = useState<PredictionResult>(() => {
-    return calculateRealtimePrediction({
-      crop: 'Tomato',
-      mandi: 'Kolar APMC Market',
-      todayPrice: 32,
+  // Initial synchronous prediction so first paint already shows crop- & mandi-specific figures
+  const initialPredictionRef = useRef<PredictionResult>(
+    calculateRealtimePrediction({
+      crop: initialCrop,
+      mandi: initialMandi,
       season: 'Current',
-      weatherFactor: 'Unseasonal Rain',
-      holidayImpact: 'Diwali / Dussehra Surge',
+      weatherFactor: 'Optimal',
+      holidayImpact: 'None',
       horizonDays: 30,
       language: 'en',
-    });
-  });
+    })
+  );
 
-  // Available crop options
-  const cropList = CROP_MASTER_LIST.map((c) => c.name);
+  // Selected crop, region, and parameters
+  const [selectedCrop, setSelectedCrop] = useState<string>(initialCrop);
+  const [selectedMandi, setSelectedMandi] = useState<string>(initialMandi);
+  const [customTodayPrice, setCustomTodayPrice] = useState<number>(initialPredictionRef.current.todayPrice);
+  const [isCustomPriceOverride, setIsCustomPriceOverride] = useState<boolean>(false);
+  const [selectedHorizon, setSelectedHorizon] = useState<7 | 15 | 30 | 60 | 90>(30);
+  const [selectedSeason, setSelectedSeason] = useState<'Kharif' | 'Rabi' | 'Zaid' | 'Current'>('Current');
+  const [selectedWeather, setSelectedWeather] = useState<'Unseasonal Rain' | 'Heatwave' | 'Monsoon Delay' | 'Optimal'>('Optimal');
+  const [selectedHoliday, setSelectedHoliday] = useState<'Diwali / Dussehra Surge' | 'Navratri Vegetarian Spike' | 'Wedding Season Peak' | 'Mandi Weekend Closure' | 'None'>('None');
 
-  // Sync today's price when crop or mandi changes
+  // Dynamic crops & mandis synced from live data.gov.in backend
+  const [availableLiveCrops, setAvailableLiveCrops] = useState<string[]>(() => CROP_MASTER_LIST.map((c) => c.name));
+  const [availableLiveMandis, setAvailableLiveMandis] = useState<MandiMetadata[]>(SUPPORTED_MANDIS);
+
+  // Active day selection in the calendar forecast
+  const [activeDayIndex, setActiveDayIndex] = useState<number>(1);
+  const [activeTab, setActiveTab] = useState<'forecast' | 'crossMandi' | 'performance'>('forecast');
+  const [loading, setLoading] = useState<boolean>(false);
+  const [syncStatusMsg, setSyncStatusMsg] = useState<string>('');
+  const [prediction, setPrediction] = useState<PredictionResult>(initialPredictionRef.current);
+
+  const requestSeqRef = useRef<number>(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Sync props if parent updates defaultCrop / defaultMandi
   useEffect(() => {
-    const profile = CROP_PROFILES[selectedCrop] || CROP_PROFILES['Tomato'];
-    const mandiData = profile?.basePricesByMandi[selectedMandi] || Object.values(profile?.basePricesByMandi || {})[0];
-    if (mandiData) {
-      const price = +(mandiData.modal / 100).toFixed(1);
-      setCustomTodayPrice(price);
+    if (defaultCrop) {
+      const canonical = resolveCanonicalCropName(defaultCrop);
+      if (canonical !== selectedCrop) {
+        setIsCustomPriceOverride(false);
+        setSelectedCrop(canonical);
+      }
     }
-  }, [selectedCrop, selectedMandi]);
+  }, [defaultCrop]);
 
-  // Recalculate prediction when inputs change
-  const handleRecalculate = async () => {
+  useEffect(() => {
+    if (defaultMandi) {
+      const canonical = resolveCanonicalMandi(defaultMandi)?.mandi || defaultMandi;
+      if (canonical !== selectedMandi) {
+        setIsCustomPriceOverride(false);
+        setSelectedMandi(canonical);
+      }
+    }
+  }, [defaultMandi]);
+
+  // Fetch live crop & mandi catalog from backend
+  useEffect(() => {
+    let active = true;
+    fetch('/api/predictions/crops')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!active || !data) return;
+        if (Array.isArray(data.availableCrops) && data.availableCrops.length > 0) {
+          setAvailableLiveCrops(data.availableCrops);
+        }
+        if (Array.isArray(data.mandis) && data.mandis.length > 0) {
+          setAvailableLiveMandis(data.mandis);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Recalculate prediction when inputs change (with request sequencing & cancellation)
+  // Pass overridePrice = null to explicitly ignore any stale manual override; omit/undefined to respect active override
+  const runForecast = async (params: {
+    crop: string;
+    mandi: string;
+    horizon: 7 | 15 | 30 | 60 | 90;
+    season: 'Kharif' | 'Rabi' | 'Zaid' | 'Current';
+    weather: 'Unseasonal Rain' | 'Heatwave' | 'Monsoon Delay' | 'Optimal';
+    holiday: 'Diwali / Dussehra Surge' | 'Navratri Vegetarian Spike' | 'Wedding Season Peak' | 'Mandi Weekend Closure' | 'None';
+    overridePrice?: number | null;
+  }) => {
+    const seq = ++requestSeqRef.current;
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    const priceToSend =
+      params.overridePrice === null
+        ? undefined
+        : typeof params.overridePrice === 'number'
+        ? params.overridePrice
+        : isCustomPriceOverride
+        ? customTodayPrice
+        : undefined;
+
+    // Instant optimistic update using client time-series model so numbers never appear stuck
+    const optimistic = calculateRealtimePrediction({
+      crop: params.crop,
+      mandi: params.mandi,
+      todayPrice: priceToSend && priceToSend > 0 ? priceToSend : undefined,
+      season: params.season,
+      weatherFactor: params.weather,
+      holidayImpact: params.holiday,
+      horizonDays: params.horizon,
+      language,
+    });
+    setPrediction(optimistic);
+    if (params.overridePrice === null || (!isCustomPriceOverride && typeof params.overridePrice !== 'number')) {
+      setCustomTodayPrice(optimistic.todayPrice);
+    }
+
     setLoading(true);
     setSyncStatusMsg('');
 
     try {
       const queryParams = new URLSearchParams({
-        crop: selectedCrop,
-        mandi: selectedMandi,
-        days: String(selectedHorizon),
-        season: selectedSeason,
-        weather: selectedWeather === 'Optimal' ? 'Optimal Clear Weather' : selectedWeather,
-        holiday: selectedHoliday === 'None' ? 'Standard Market Days' : selectedHoliday,
+        crop: params.crop,
+        mandi: params.mandi,
+        days: String(params.horizon),
+        season: params.season,
+        weather: params.weather,
+        holiday: params.holiday,
         language: language || 'en',
       });
+      if (priceToSend && priceToSend > 0) {
+        queryParams.set('todayPrice', String(priceToSend));
+      }
 
-      const res = await fetch(`/api/predictions/forecast?${queryParams.toString()}`);
+      const res = await fetch(`/api/predictions/forecast?${queryParams.toString()}`, {
+        signal: controller.signal,
+      });
+
+      if (seq !== requestSeqRef.current) return;
 
       if (res.ok) {
         const data = await res.json();
+        if (seq !== requestSeqRef.current) return;
         if (data.forecast) {
-          setPrediction({
-            ...data.forecast,
-            lastRetrieved: `Trading Session: ${data.forecast.actualTradingDate} · Synced at 10:00 AM IST`,
-          });
+          setPrediction(data.forecast);
+          if (params.overridePrice === null || (!isCustomPriceOverride && typeof params.overridePrice !== 'number')) {
+            setCustomTodayPrice(data.forecast.todayPrice);
+          }
+          setLoading(false);
+          return;
         }
-      } else {
-        // Fallback to local calculation
-        const local = calculateRealtimePrediction({
-          crop: selectedCrop,
-          mandi: selectedMandi,
-          todayPrice: customTodayPrice,
-          season: selectedSeason,
-          weatherFactor: selectedWeather,
-          holidayImpact: selectedHoliday === 'None' ? undefined : selectedHoliday,
-          horizonDays: selectedHorizon,
-          language,
-        });
-        setPrediction(local);
       }
-    } catch {
-      const local = calculateRealtimePrediction({
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return;
+    } finally {
+      if (seq === requestSeqRef.current) {
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleRecalculate = (overridePrice?: number | null) => {
+    void runForecast({
+      crop: selectedCrop,
+      mandi: selectedMandi,
+      horizon: selectedHorizon,
+      season: selectedSeason,
+      weather: selectedWeather,
+      holiday: selectedHoliday,
+      overridePrice,
+    });
+  };
+
+  // Re-run whenever crop, mandi, horizon, season, weather, holiday, or language changes
+  useEffect(() => {
+    void runForecast({
+      crop: selectedCrop,
+      mandi: selectedMandi,
+      horizon: selectedHorizon,
+      season: selectedSeason,
+      weather: selectedWeather,
+      holiday: selectedHoliday,
+      overridePrice: isCustomPriceOverride ? customTodayPrice : null,
+    });
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, [selectedCrop, selectedMandi, selectedHorizon, selectedSeason, selectedWeather, selectedHoliday, language]);
+
+  // Handle Agmarknet manual sync via server-side data.gov.in proxy
+  const handleAgmarknetSync = async () => {
+    setLoading(true);
+    const success = await syncAgmarknet();
+    if (success) {
+      setIsCustomPriceOverride(false);
+      setSyncStatusMsg(t('Live data.gov.in Agmarknet modal prices & market arrivals synchronized!'));
+      try {
+        const res = await fetch('/api/predictions/crops');
+        if (res.ok) {
+          const catalog = await res.json();
+          if (Array.isArray(catalog.availableCrops)) setAvailableLiveCrops(catalog.availableCrops);
+          if (Array.isArray(catalog.mandis)) setAvailableLiveMandis(catalog.mandis);
+        }
+      } catch {
+        // ignore catalog refresh failure
+      }
+      await runForecast({
         crop: selectedCrop,
         mandi: selectedMandi,
-        todayPrice: customTodayPrice,
+        horizon: selectedHorizon,
         season: selectedSeason,
-        weatherFactor: selectedWeather,
-        holidayImpact: selectedHoliday === 'None' ? undefined : selectedHoliday,
-        horizonDays: selectedHorizon,
-        language,
+        weather: selectedWeather,
+        holiday: selectedHoliday,
+        overridePrice: null,
       });
-      setPrediction(local);
-    } finally {
+    } else {
+      setSyncStatusMsg(t('Sync completed with regional government cache.'));
       setLoading(false);
     }
   };
 
-  // Re-run on crop, price, horizon, or language switch
-  useEffect(() => {
-    handleRecalculate();
-  }, [selectedCrop, selectedMandi, customTodayPrice, selectedHorizon, selectedSeason, selectedWeather, selectedHoliday, language]);
-
-  // Handle Agmarknet manual sync
-  const handleAgmarknetSync = async () => {
-    setLoading(true);
-    const success = await syncAgmarknet(apiKeyInput);
-    if (success) {
-      setSyncStatusMsg(t('Agmarknet / data.gov.in repository live feed synchronized successfully!'));
-      handleRecalculate();
-    } else {
-      setSyncStatusMsg(t('Sync completed with regional government cache.'));
-    }
-    setLoading(false);
-  };
-
   const points = prediction.forecastPoints || prediction.dailyPoints || [];
-  const selectedPoint = points[activeDayIndex] || points[1] || points[0] || {
+  const safeDayIndex = activeDayIndex < points.length ? activeDayIndex : Math.min(1, Math.max(0, points.length - 1));
+  const selectedPoint = points[safeDayIndex] || points[1] || points[0] || {
     dayIndex: 0,
     dateStr: 'Today',
     dayLabel: 'Today',
@@ -174,7 +282,7 @@ export const AIPricePredictionTool: React.FC = () => {
     confidenceScore: 94,
   };
 
-  const selectedCropObj = CROP_MASTER_LIST.find((c) => c.name === selectedCrop) || CROP_MASTER_LIST[0];
+  const selectedCropMaster = CROP_MASTER_LIST.find((c) => c.name === selectedCrop);
 
   return (
     <div className="bg-white/90 backdrop-blur-2xl rounded-3xl border border-white/80 shadow-2xl shadow-emerald-950/10 p-6 sm:p-8 text-[#123D2A] space-y-7 relative overflow-hidden">
@@ -184,11 +292,18 @@ export const AIPricePredictionTool: React.FC = () => {
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-[#123D2A]/10">
         <div className="space-y-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-[#123D2A] text-xs font-black border border-emerald-300">
-              <span className="w-2 h-2 rounded-full bg-[#10B981] animate-ping" />
-              <Database className="w-3.5 h-3.5 text-[#10B981]" />
-              <span>{t('data.gov.in / AGMARKNET Live Feed')}</span>
-            </span>
+            {prediction.liveApiConnected ? (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-[#123D2A] text-xs font-black border border-emerald-300">
+                <span className="w-2 h-2 rounded-full bg-[#10B981] animate-ping" />
+                <Database className="w-3.5 h-3.5 text-[#10B981]" />
+                <span>{t('data.gov.in / AGMARKNET Live Feed')}</span>
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 text-amber-950 text-xs font-black border border-amber-300">
+                <Database className="w-3.5 h-3.5 text-amber-700" />
+                <span>{t('AGMARKNET Historical Baseline (Offline/Cached)')}</span>
+              </span>
+            )}
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-900 font-bold">
               {t('Resource ID')}: {agmarknetConfig.resourceId.slice(0, 8)}...
             </span>
@@ -196,28 +311,28 @@ export const AIPricePredictionTool: React.FC = () => {
               <ShieldCheck className="w-3 h-3 text-purple-600" /> {t('Grounded Forecast (No Fabrication)')}
             </span>
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 font-bold flex items-center gap-1">
-              <Clock className="w-3 h-3 text-amber-600" /> {t('Trading Session')}: {prediction.actualTradingDate || 'Today'}
+              <Clock className="w-3 h-3 text-amber-600" /> {t('Latest Market Date')}: {prediction.actualTradingDate || 'Baseline'}
             </span>
           </div>
 
           <h3 className="text-xl sm:text-2xl font-black text-[#123D2A] tracking-tight">
-            {t('Real-Time Mandi AI Price Forecasting Engine')}
+            {mode === 'buyer'
+              ? t('Buyer Real-Time Mandi AI Procurement Forecast')
+              : mode === 'admin'
+              ? t('Admin National APMC AI Price & Spread Monitor')
+              : t('Real-Time Mandi AI Price Forecasting Engine')}
           </h3>
           <p className="text-xs text-[#18251E]/70 font-medium">
-            {t('Independent machine learning forecasts for every crop with arrival volume elasticity, meteorological feeds, backtested accuracy, and spatial inter-mandi arbitrage.')}
+            {t('Live crop-specific and mandi-specific forecasts grounded in data.gov.in Agmarknet modal prices, arrival volume elasticity, and meteorological drivers.')}
           </p>
         </div>
 
         {/* Action Controls */}
         <div className="flex items-center gap-2.5 flex-wrap">
-          <button
-            onClick={() => setApiKeyModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white border border-[#123D2A]/15 hover:border-[#10B981] text-xs font-bold text-[#123D2A] transition-all shadow-xs cursor-pointer"
-            title={t('Configure data.gov.in API Key')}
-          >
-            <Key className="w-3.5 h-3.5 text-[#10B981]" />
-            <span>{t('e-Agri API Key')}</span>
-          </button>
+          <span className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-bold text-[#123D2A]">
+            <ShieldCheck className="w-3.5 h-3.5 text-[#10B981]" />
+            <span>{prediction.liveApiConnected ? t('data.gov.in Live Connected') : t('Agmarknet Grounded')}</span>
+          </span>
 
           <button
             onClick={handleAgmarknetSync}
@@ -278,33 +393,48 @@ export const AIPricePredictionTool: React.FC = () => {
         <div className="space-y-1.5">
           <label className="text-[11px] font-black uppercase tracking-wider text-[#123D2A]/70 flex items-center justify-between">
             <span>{t('Crop Commodity')}</span>
-            <span className="text-emerald-700 font-bold">({cropList.length} {t('Crops')})</span>
+            <span className="text-emerald-700 font-bold">({availableLiveCrops.length} {t('Crops')})</span>
           </label>
           <select
             value={selectedCrop}
-            onChange={(e) => setSelectedCrop(e.target.value)}
+            onChange={(e) => {
+              setIsCustomPriceOverride(false);
+              setSelectedCrop(e.target.value);
+            }}
             className="w-full px-3.5 py-2.5 rounded-2xl bg-white border border-[#123D2A]/15 font-bold text-xs text-[#123D2A] focus:border-[#10B981] focus:outline-none shadow-xs"
           >
-            {CROP_MASTER_LIST.map((cropItem) => (
-              <option key={cropItem.id} value={cropItem.name}>
-                {language === 'kn' ? cropItem.kannadaName : language === 'hi' ? cropItem.hindiName : cropItem.name} ({t(cropItem.category)})
-              </option>
-            ))}
+            {Array.from(new Set([...availableLiveCrops, selectedCrop])).map((cropName) => {
+              const master = CROP_MASTER_LIST.find((c) => c.name === cropName);
+              const label = master
+                ? `${language === 'kn' ? master.kannadaName : language === 'hi' ? master.hindiName : master.name} (${t(master.category)})`
+                : `${cropName} (Agmarknet)`;
+              return (
+                <option key={cropName} value={cropName}>
+                  {label}
+                </option>
+              );
+            })}
           </select>
         </div>
 
         {/* 2. Benchmark APMC Mandi */}
         <div className="space-y-1.5">
-          <label className="text-[11px] font-black uppercase tracking-wider text-[#123D2A]/70 flex items-center gap-1">
-            <MapPin className="w-3.5 h-3.5 text-[#10B981]" />
-            <span>{t('Benchmark APMC Mandi')}</span>
+          <label className="text-[11px] font-black uppercase tracking-wider text-[#123D2A]/70 flex items-center justify-between">
+            <span className="flex items-center gap-1">
+              <MapPin className="w-3.5 h-3.5 text-[#10B981]" />
+              <span>{t('Benchmark APMC Mandi')}</span>
+            </span>
+            <span className="text-emerald-700 font-bold">({availableLiveMandis.length})</span>
           </label>
           <select
             value={selectedMandi}
-            onChange={(e) => setSelectedMandi(e.target.value)}
+            onChange={(e) => {
+              setIsCustomPriceOverride(false);
+              setSelectedMandi(e.target.value);
+            }}
             className="w-full px-3.5 py-2.5 rounded-2xl bg-white border border-[#123D2A]/15 font-bold text-xs text-[#123D2A] focus:border-[#10B981] focus:outline-none shadow-xs"
           >
-            {SUPPORTED_MANDIS.map((m) => (
+            {availableLiveMandis.map((m) => (
               <option key={m.mandi} value={m.mandi}>
                 {t(m.mandi)} ({t(m.state)})
               </option>
@@ -325,7 +455,12 @@ export const AIPricePredictionTool: React.FC = () => {
               step="0.5"
               min="1"
               value={customTodayPrice}
-              onChange={(e) => setCustomTodayPrice(Number(e.target.value) || 1)}
+              onChange={(e) => {
+                const nextVal = Number(e.target.value) || 1;
+                setIsCustomPriceOverride(true);
+                setCustomTodayPrice(nextVal);
+                handleRecalculate(nextVal);
+              }}
               className="w-full pl-8 pr-3 py-2.5 rounded-2xl bg-white border border-[#123D2A]/15 font-black text-sm text-[#123D2A] focus:border-[#10B981] focus:outline-none shadow-xs"
             />
           </div>
@@ -397,15 +532,25 @@ export const AIPricePredictionTool: React.FC = () => {
       {/* -----------------------------------------------------------------------
           MAIN HIGHLIGHT CARDS: TODAY vs TOMORROW (DAY 1) vs HORIZON PEAK
          ----------------------------------------------------------------------- */}
+      {prediction.predictionAvailable === false ? (
+        <div className="p-6 rounded-3xl bg-rose-50 border-2 border-rose-200 text-rose-950 space-y-2">
+          <h4 className="font-black text-base">
+            {t('AI Price Prediction Unavailable')} — {prediction.crop} ({prediction.mandi})
+          </h4>
+          <p className="text-xs text-rose-900/80 font-medium">
+            {prediction.unavailableReason || t('Insufficient verified historical market records are available for this commodity to produce a reliable forecast.')}
+          </p>
+        </div>
+      ) : (
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-        {/* Card 1: Today's Observed Mandi Price */}
+        {/* Card 1: Actual Observed Market Reference */}
         <div className="p-5 rounded-3xl bg-white border border-[#123D2A]/15 shadow-sm space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-black uppercase tracking-wider text-gray-500">
-              {t("Today's Mandi Base")}
+              {t("Actual Market Price")}
             </span>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-[#123D2A] font-bold">
-              {t('Observed')}
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${prediction.liveApiConnected ? 'bg-emerald-100 text-[#123D2A]' : 'bg-amber-100 text-amber-900'}`}>
+              {prediction.liveApiConnected ? t('Live Verified') : t('Historical Baseline')}
             </span>
           </div>
 
@@ -416,26 +561,28 @@ export const AIPricePredictionTool: React.FC = () => {
               </span>
               <span className="text-xs text-[#123D2A]/70"> / kg</span>
             </div>
-            <span className="text-xs text-gray-500 font-semibold">
-              ₹{(prediction.todayPrice * 100).toFixed(0)} / Qtl
+            <span className="text-xs text-gray-700 font-bold">
+              ₹{prediction.modalPriceQuintal || (prediction.todayPrice * 100).toFixed(0)} / Qtl Modal
             </span>
           </div>
 
-          <div className="text-[11px] text-[#18251E]/70 pt-2 border-t border-gray-100 space-y-1">
-            <p><strong>{t('Market')}:</strong> {t(prediction.mandi)}</p>
-            <p><strong>{t('Trading Session')}:</strong> {prediction.actualTradingDate || 'Today'}</p>
+          <div className="text-[11px] text-[#18251E]/75 pt-2 border-t border-gray-100 space-y-1">
+            <p><strong>{t('Market')}:</strong> {t(prediction.mandi)} ({prediction.district || ''}, {prediction.state})</p>
+            <p><strong>{t('Variety & Grade')}:</strong> {prediction.variety || 'FAQ Standard'} &bull; {prediction.grade || 'FAQ'}</p>
+            <p><strong>{t('Range (Qtl)')}:</strong> Min ₹{prediction.minPriceQuintal || Math.round(prediction.todayPrice * 90)} &ndash; Max ₹{prediction.maxPriceQuintal || Math.round(prediction.todayPrice * 110)} / Qtl</p>
+            <p><strong>{t('Market Date')}:</strong> {prediction.actualTradingDate || 'Today'}</p>
           </div>
         </div>
 
-        {/* Card 2: Tomorrow's Day 1 Prediction */}
+        {/* Card 2: Tomorrow's AI Predicted Price (Day 1) */}
         <div className="p-5 rounded-3xl bg-gradient-to-br from-emerald-50 to-teal-50 border-2 border-[#10B981] shadow-md space-y-3 relative overflow-hidden">
           <div className="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-[#10B981] text-white font-black text-[9px] uppercase tracking-wider">
-            {t('Day 1 Target')}
+            {t('AI Prediction · Day 1')}
           </div>
 
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-black uppercase tracking-wider text-[#10B981]">
-              {t("Tomorrow's Prediction")} ({points[1]?.dateStr || 'Day 1'})
+              {t("Tomorrow's AI Prediction")} ({points[1]?.dateStr || 'Day 1'})
             </span>
           </div>
 
@@ -445,6 +592,9 @@ export const AIPricePredictionTool: React.FC = () => {
                 ₹{prediction.tomorrowPrice}
               </span>
               <span className="text-xs text-[#123D2A]/70"> / kg</span>
+              <span className="text-[11px] font-bold text-emerald-900/75 block">
+                ₹{(prediction.tomorrowPrice * 100).toFixed(0)} / Qtl
+              </span>
             </div>
             <span
               className={`text-xs font-black px-2.5 py-1 rounded-full flex items-center gap-1 ${
@@ -468,33 +618,42 @@ export const AIPricePredictionTool: React.FC = () => {
           </div>
 
           <div className="text-[11px] text-[#18251E]/80 pt-2 border-t border-emerald-200/60 flex items-center justify-between">
-            <span>{t('Range')}: <strong>₹{points[1]?.minRange || prediction.tomorrowPrice} - ₹{points[1]?.maxRange || prediction.tomorrowPrice}</strong></span>
+            <span>{t('Range')}: <strong>₹{points[1]?.minRange || prediction.tomorrowPrice} - ₹{points[1]?.maxRange || prediction.tomorrowPrice}/kg</strong></span>
             <span className="font-bold text-[#10B981]">{points[1]?.confidenceScore || 95}% {t('Confidence')}</span>
           </div>
         </div>
 
-        {/* Card 3: Horizon Peak Trajectory */}
+        {/* Card 3: AI Predicted Horizon Peak Trajectory */}
         <div className="p-5 rounded-3xl bg-gradient-to-br from-[#123D2A] to-emerald-950 text-white shadow-lg space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-black uppercase tracking-wider text-[#C6FF4A]">
-              {selectedHorizon}-{t('Day Projected Target')}
+              {t('AI Prediction')} · {selectedHorizon}-{t('Day Target')}
             </span>
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/20 text-[#C6FF4A] font-bold">
               {points[Math.min(selectedHorizon, points.length - 1)]?.dateStr || 'End'}
             </span>
           </div>
 
-          <div className="flex items-baseline justify-between">
-            <div>
-              <span className="text-3xl sm:text-4xl font-black text-[#C6FF4A]">
-                ₹{points[Math.min(selectedHorizon, points.length - 1)]?.predictedPrice || prediction.day7Price}
-              </span>
-              <span className="text-xs text-emerald-200"> / kg</span>
-            </div>
-            <span className="text-xs font-extrabold text-[#C6FF4A] bg-white/10 px-2.5 py-1 rounded-full">
-              {prediction.changePercent >= 0 ? '+' : ''}{prediction.changePercent}% {t('Net')}
-            </span>
-          </div>
+          {(() => {
+            const targetVal = points[Math.min(selectedHorizon, points.length - 1)]?.predictedPrice || prediction.day7Price;
+            const horizonPct = +(((targetVal - prediction.todayPrice) / (prediction.todayPrice || 1)) * 100).toFixed(1);
+            return (
+              <div className="flex items-baseline justify-between">
+                <div>
+                  <span className="text-3xl sm:text-4xl font-black text-[#C6FF4A]">
+                    ₹{targetVal}
+                  </span>
+                  <span className="text-xs text-emerald-200"> / kg</span>
+                  <span className="text-[11px] font-bold text-emerald-200/80 block">
+                    ₹{(targetVal * 100).toFixed(0)} / Qtl
+                  </span>
+                </div>
+                <span className="text-xs font-extrabold text-[#C6FF4A] bg-white/10 px-2.5 py-1 rounded-full">
+                  {horizonPct >= 0 ? '+' : ''}{horizonPct}% {t('Net')}
+                </span>
+              </div>
+            );
+          })()}
 
           <div className="text-[11px] text-emerald-200 pt-2 border-t border-white/10 space-y-1">
             <p className="truncate"><strong>{t('Window')}:</strong> {prediction.bestSellingWindow}</p>
@@ -502,6 +661,7 @@ export const AIPricePredictionTool: React.FC = () => {
           </div>
         </div>
       </div>
+      )}
 
       {/* -----------------------------------------------------------------------
           VIEW TABS: FORECAST CALENDAR / CROSS-MANDI SPATIAL / MODEL PERFORMANCE
@@ -1000,13 +1160,13 @@ export const AIPricePredictionTool: React.FC = () => {
                 <span className="flex items-center gap-1">
                   <ShieldCheck className="w-3.5 h-3.5" /> {t('Direct wholesale procurement matching active')}
                 </span>
-                <span>{t('Shelf Life')}: {selectedCropObj.perishabilityDays} {t('Days')}</span>
+                <span>{t('Shelf Life')}: {selectedCropMaster?.perishabilityDays ?? 21} {t('Days')}</span>
               </div>
             </div>
           </div>
 
           <button
-            onClick={handleRecalculate}
+            onClick={() => handleRecalculate()}
             disabled={loading}
             className="w-full py-3 rounded-2xl bg-emerald-100 hover:bg-emerald-200 text-[#123D2A] font-extrabold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs"
           >
@@ -1015,102 +1175,6 @@ export const AIPricePredictionTool: React.FC = () => {
           </button>
         </div>
       </div>
-
-      {/* -----------------------------------------------------------------------
-          API KEY CONFIGURATION MODAL (e-Agri & data.gov.in)
-         ----------------------------------------------------------------------- */}
-      <AnimatePresence>
-        {apiKeyModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-lg bg-white rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl border border-[#123D2A]/15 text-[#123D2A]"
-            >
-              <div className="flex items-center justify-between pb-3 border-b border-gray-100">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-[#123D2A] flex items-center justify-center">
-                    <Key className="w-5 h-5 text-[#10B981]" />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-black text-[#123D2A]">{t('e-Agri & Agmarknet API Config')}</h3>
-                    <p className="text-xs text-[#18251E]/60">{t('Government of India Open Data Integration')}</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setApiKeyModalOpen(false)}
-                  className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 flex items-center justify-center font-bold text-xs cursor-pointer"
-                >
-                  ✕
-                </button>
-              </div>
-
-              <div className="space-y-4 text-xs">
-                <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 space-y-1 text-[#123D2A]">
-                  <p className="font-bold">{t('Official Repository Standard')}:</p>
-                  <p className="text-[11px] text-[#18251E]/80">
-                    <strong>{t('Endpoint')}:</strong> <code>https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070</code>
-                  </p>
-                  <p className="text-[11px] text-[#18251E]/80">
-                    <strong>{t('Dataset')}:</strong> {t('Current Daily Price and Arrival of Commodities (Agmarknet e-NAM Feed).')}
-                  </p>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="font-bold text-[#123D2A] block">{t('data.gov.in API Key')}</label>
-                  <input
-                    type="text"
-                    value={apiKeyInput}
-                    onChange={(e) => setApiKeyInput(e.target.value)}
-                    placeholder={t('Enter your data.gov.in API Key')}
-                    className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-300 font-mono text-xs focus:bg-white focus:border-[#10B981] focus:outline-none"
-                  />
-                  <p className="text-[10px] text-gray-500">
-                    {t('Default DEMO-DATA-GOV-IN-AGRI-2026 is pre-authorized with verified agricultural mandi records across Karnataka, AP, and Maharashtra.')}
-                  </p>
-                </div>
-
-                <div className="flex items-center justify-between pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setApiKeyInput('DEMO-DATA-GOV-IN-AGRI-2026')}
-                    className="text-[11px] text-[#10B981] hover:underline font-bold cursor-pointer"
-                  >
-                    {t('Restore Default Sandbox Key')}
-                  </button>
-                  <a
-                    href="https://data.gov.in"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-[11px] text-gray-500 hover:text-[#123D2A] flex items-center gap-1"
-                  >
-                    {t('Get Free Gov Key')} <ExternalLink className="w-3 h-3" />
-                  </a>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-gray-100">
-                <button
-                  onClick={() => setApiKeyModalOpen(false)}
-                  className="px-5 py-2.5 rounded-full border border-gray-200 text-xs font-bold text-gray-600 hover:bg-gray-50 cursor-pointer"
-                >
-                  {t('Cancel')}
-                </button>
-                <button
-                  onClick={async () => {
-                    await handleAgmarknetSync();
-                    setApiKeyModalOpen(false);
-                  }}
-                  className="px-6 py-2.5 rounded-full bg-[#123D2A] text-white font-extrabold text-xs shadow-md hover:bg-[#064e3b] cursor-pointer"
-                >
-                  {t('Save & Synchronize Feed')}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
     </div>
   );
 };

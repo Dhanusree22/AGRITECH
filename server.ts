@@ -9,6 +9,8 @@ dotenv.config();
 type EngineModules = {
   mandi: typeof import('./src/services/mandiPredictionEngine');
   agent: typeof import('./src/services/aiAgent/aiAgentController');
+  agmarknetLive: typeof import('./src/services/marketData/agmarknetLiveClient');
+  marketDb: typeof import('./src/services/marketData/historicalMarketDatabase');
 };
 
 let engineModulesPromise: Promise<EngineModules> | null = null;
@@ -17,7 +19,9 @@ function getEngineModules(): Promise<EngineModules> {
     engineModulesPromise = Promise.all([
       import('./src/services/mandiPredictionEngine'),
       import('./src/services/aiAgent/aiAgentController'),
-    ]).then(([mandi, agent]) => ({ mandi, agent }));
+      import('./src/services/marketData/agmarknetLiveClient'),
+      import('./src/services/marketData/historicalMarketDatabase'),
+    ]).then(([mandi, agent, agmarknetLive, marketDb]) => ({ mandi, agent, agmarknetLive, marketDb }));
   }
   return engineModulesPromise;
 }
@@ -387,16 +391,23 @@ Output ONLY the exact transcribed words in the spoken language script (if no int
     }
   });
 
-  // 2. Real-Time Mandi Prices Endpoint (APMC & Agmarknet Feeds)
+  // 2. Real-Time Mandi Prices Endpoint (APMC & live data.gov.in Agmarknet Feeds)
   app.get('/api/mandi/prices', async (req, res) => {
     try {
-      const { getLiveMandiPricesList } = (await getEngineModules()).mandi;
-      const prices = getLiveMandiPricesList();
+      const { mandi, agmarknetLive, marketDb } = await getEngineModules();
+      const syncStatus = await agmarknetLive.syncAgmarknetLiveFeed({
+        commodity: req.query.crop as string | undefined,
+        state: req.query.state as string | undefined,
+      });
+      const prices = mandi.getLiveMandiPricesList();
       return res.json({
         success: true,
         total: prices.length,
-        source: 'AGMARKNET / data.gov.in Official API (Resource: 9ef84268-d588-465a-a308-a864a43d0070)',
-        lastSyncedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' Today',
+        liveApiReachable: syncStatus.liveApiReachable,
+        availableCrops: marketDb.marketDataRepository.getAvailableCrops(),
+        availableMandis: marketDb.marketDataRepository.getAvailableMandis(),
+        source: syncStatus.source,
+        lastSyncedAt: syncStatus.lastSyncedAt,
         prices,
       });
     } catch (err: any) {
@@ -427,7 +438,7 @@ Output ONLY the exact transcribed words in the spoken language script (if no int
   // 2.2 Multi-Day Real-Time Mandi AI Prediction Endpoint
   const handlePricePrediction = async (req: express.Request, res: express.Response) => {
     try {
-      const { calculateRealtimePrediction } = (await getEngineModules()).mandi;
+      const { mandi: mandiMod, agmarknetLive } = await getEngineModules();
       const {
         crop = 'Tomato',
         mandi = 'Kolar APMC Market',
@@ -437,19 +448,22 @@ Output ONLY the exact transcribed words in the spoken language script (if no int
         weatherFactor = 'Unseasonal Rain',
         holidayImpact = 'Diwali / Dussehra Surge',
         horizon = '7days',
+        horizonDays,
         language = 'en',
       } = req.body;
 
-      // Base mathematical & regional calculation with daily points
-      const baselineResult = calculateRealtimePrediction({
+      await agmarknetLive.syncAgmarknetLiveFeed({ commodity: crop, market: mandi });
+
+      const baselineResult = mandiMod.calculateRealtimePrediction({
         crop,
         mandi,
         state,
-        todayPrice: Number(todayPrice) || undefined,
+        todayPrice: Number(todayPrice) > 0 ? Number(todayPrice) : undefined,
         season,
         weatherFactor,
         holidayImpact,
         horizon,
+        horizonDays: Number(horizonDays) ? (Number(horizonDays) as any) : undefined,
         language,
       });
 
@@ -514,21 +528,37 @@ Write all text directly in the target language (${language === 'kn' ? 'Kannada /
   app.post('/api/gemini/price-prediction', handlePricePrediction);
   app.post('/api/gemini/predict', handlePricePrediction);
 
-  // 2.3 e-Agri & Agmarknet Government API Sync Endpoint
-  app.post('/api/agmarknet/sync', (req, res) => {
+  // 2.3 e-Agri & Agmarknet Government API Sync Endpoint (uses server-side DATA_GOV_API_KEY)
+  app.post('/api/agmarknet/sync', async (req, res) => {
     try {
-      const { apiKey = 'DEMO-DATA-GOV-IN-AGRI-2026', resourceId = '9ef84268-d588-465a-a308-a864a43d0070' } = req.body;
-      const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' Today';
+      const { agmarknetLive, marketDb, mandi } = await getEngineModules();
+      const { commodity, state, market, resourceId = agmarknetLive.AGMARKNET_RESOURCE_ID } = req.body || {};
+
+      const syncResult = await agmarknetLive.syncAgmarknetLiveFeed({
+        commodity,
+        state,
+        market,
+        forceRefresh: true,
+      });
+
+      const prices = mandi.getLiveMandiPricesList();
+      const status = marketDb.marketDataRepository.getStatus();
 
       return res.json({
         success: true,
-        message: 'Successfully synchronized real-time daily modal prices and arrivals from data.gov.in / AGMARKNET repository.',
+        liveApiReachable: syncResult.liveApiReachable,
+        message: syncResult.message,
+        fetchedCount: syncResult.fetchedCount,
+        ingestedCount: syncResult.ingestedCount,
+        availableCrops: marketDb.marketDataRepository.getAvailableCrops(),
+        availableMandis: marketDb.marketDataRepository.getAvailableMandis(),
+        prices,
         syncConfig: {
-          apiKey: apiKey.slice(0, 4) + '••••••••' + apiKey.slice(-4),
-          source: 'data.gov.in (Agmarknet e-NAM Feed)',
-          lastSyncedAt: timestamp,
+          apiKey: 'SERVER-CONFIGURED',
+          source: syncResult.source,
+          lastSyncedAt: syncResult.lastSyncedAt,
           status: 'Connected',
-          totalRecordsLoaded: 48,
+          totalRecordsLoaded: status.liveRecordsCount > 0 ? status.liveRecordsCount : prices.length,
           resourceId,
         },
       });
@@ -539,10 +569,15 @@ Write all text directly in the target language (${language === 'kn' ? 'Kannada /
   });
 
   app.get('/api/agmarknet/status', async (req, res) => {
-    const { DEFAULT_AGMARKNET_CONFIG } = (await getEngineModules()).mandi;
+    const { mandi, marketDb } = await getEngineModules();
+    const repoStatus = marketDb.marketDataRepository.getStatus();
     return res.json({
       success: true,
-      config: DEFAULT_AGMARKNET_CONFIG,
+      config: {
+        ...mandi.DEFAULT_AGMARKNET_CONFIG,
+        totalRecordsLoaded: repoStatus.liveRecordsCount > 0 ? repoStatus.liveRecordsCount : mandi.DEFAULT_AGMARKNET_CONFIG.totalRecordsLoaded,
+      },
+      repoStatus,
     });
   });
 
@@ -597,13 +632,14 @@ Write all text directly in the target language (${language === 'kn' ? 'Kannada /
     }
   });
 
-  // GET /api/predictions/crops - List all supported crop definitions
+  // GET /api/predictions/crops - List all supported & live-discovered crop/mandi definitions
   app.get('/api/predictions/crops', async (req, res) => {
-    const { CROP_MASTER_LIST, SUPPORTED_MANDIS } = (await getEngineModules()).mandi;
+    const { mandi, marketDb } = await getEngineModules();
     return res.json({
       success: true,
-      count: CROP_MASTER_LIST.length,
-      crops: CROP_MASTER_LIST.map((c) => ({
+      count: marketDb.marketDataRepository.getAvailableCrops().length,
+      availableCrops: marketDb.marketDataRepository.getAvailableCrops(),
+      crops: mandi.CROP_MASTER_LIST.map((c) => ({
         id: c.id,
         name: c.name,
         hindiName: c.hindiName,
@@ -619,7 +655,7 @@ Write all text directly in the target language (${language === 'kn' ? 'Kannada /
         volatilityRating: c.volatilityRating,
         varieties: c.typicalVarieties,
       })),
-      mandis: SUPPORTED_MANDIS,
+      mandis: marketDb.marketDataRepository.getAvailableMandis(),
     });
   });
 
@@ -644,24 +680,37 @@ Write all text directly in the target language (${language === 'kn' ? 'Kannada /
     });
   });
 
-  // GET /api/predictions/forecast - Multi-horizon forecasting endpoint
+  // GET /api/predictions/forecast - Multi-horizon forecasting endpoint grounded in live data.gov.in + time-series
   app.get('/api/predictions/forecast', async (req, res) => {
     try {
-      const { CROP_MASTER_LIST, executeCropMarketForecast } = (await getEngineModules()).mandi;
+      const { mandi: mandiMod, agmarknetLive } = await getEngineModules();
       const {
         crop = 'Tomato',
         cropId,
         mandi = 'Kolar APMC Market',
+        state,
+        district,
+        variety,
+        todayPrice,
         days = '30',
         season = 'Current',
-        weather = 'Unseasonal Rain',
-        holiday = 'Diwali / Dussehra Surge',
+        weather = 'Optimal',
+        holiday = 'None',
         language = 'en',
       } = req.query as Record<string, string>;
 
       const targetCrop = cropId
-        ? CROP_MASTER_LIST.find((c) => c.id.toLowerCase() === cropId.toLowerCase())?.name || crop
+        ? mandiMod.CROP_MASTER_LIST.find((c) => c.id.toLowerCase() === cropId.toLowerCase())?.name || crop
         : crop;
+
+      // Sync live data.gov.in batch (cached 5m TTL separated by commodity/state/district/market/variety)
+      const syncStatus = await agmarknetLive.syncAgmarknetLiveFeed({
+        commodity: targetCrop,
+        state,
+        district,
+        market: mandi,
+        variety,
+      });
 
       const horizonDaysNum = parseInt(days, 10);
       const horizonDays: 7 | 15 | 30 | 60 | 90 =
@@ -670,9 +719,13 @@ Write all text directly in the target language (${language === 'kn' ? 'Kannada /
         horizonDaysNum >= 30 ? 30 :
         horizonDaysNum >= 15 ? 15 : 7;
 
-      const forecast = executeCropMarketForecast({
+      const parsedTodayPrice = todayPrice ? Number(todayPrice) : undefined;
+
+      const forecast = mandiMod.executeCropMarketForecast({
         crop: targetCrop,
         mandi,
+        state,
+        todayPrice: parsedTodayPrice && parsedTodayPrice > 0 ? parsedTodayPrice : undefined,
         horizonDays,
         season: season as any,
         weatherFactor: weather as any,
@@ -682,7 +735,8 @@ Write all text directly in the target language (${language === 'kn' ? 'Kannada /
 
       return res.json({
         success: true,
-        source: 'AGMARKNET & e-NAM Verified Historical Time-Series Engine',
+        liveApiReachable: syncStatus.liveApiReachable,
+        source: forecast.dataSource || syncStatus.source,
         forecast,
       });
     } catch (err: any) {
@@ -769,19 +823,20 @@ Write all text directly in the target language (${language === 'kn' ? 'Kannada /
   // POST /api/predictions/recalculate - Recalculate with dynamic parameters
   app.post('/api/predictions/recalculate', async (req, res) => {
     try {
-      const { executeCropMarketForecast } = (await getEngineModules()).mandi;
-      const {
-        crop = 'Tomato',
-        mandi = 'Kolar APMC Market',
-        todayPrice,
-        horizonDays = 30,
-        season = 'Current',
-        weatherFactor = 'Unseasonal Rain',
-        holidayImpact = 'Diwali / Dussehra Surge',
-        language = 'en',
-      } = req.body;
+      const { mandi: mandiMod, agmarknetLive } = await getEngineModules();
+      const body = req.body || {};
+      const crop = body.crop || 'Tomato';
+      const mandi = body.mandi || 'Kolar APMC Market';
+      const todayPrice = body.todayPrice;
+      const horizonDays = body.horizonDays ?? body.days ?? 30;
+      const season = body.season || 'Current';
+      const weatherFactor = body.weatherFactor || body.weather || 'Optimal';
+      const holidayImpact = body.holidayImpact || body.holiday || 'None';
+      const language = body.language || 'en';
 
-      const result = executeCropMarketForecast({
+      await agmarknetLive.syncAgmarknetLiveFeed({ commodity: crop, market: mandi });
+
+      const result = mandiMod.executeCropMarketForecast({
         crop,
         mandi,
         todayPrice: Number(todayPrice) || undefined,
@@ -795,6 +850,7 @@ Write all text directly in the target language (${language === 'kn' ? 'Kannada /
       return res.json({
         success: true,
         result,
+        forecast: result,
       });
     } catch (err: any) {
       console.error('Recalculate Error:', err);

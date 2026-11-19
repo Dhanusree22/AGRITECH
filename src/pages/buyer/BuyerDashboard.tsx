@@ -57,8 +57,16 @@ import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { useStore } from '../../context/StoreContext';
 import { AINegotiationTool } from '../../components/ai/AINegotiationTool';
+import { AIPricePredictionTool } from '../../components/ai/AIPricePredictionTool';
 import { VoiceAssistantModal } from '../../components/voice/VoiceAssistantModal';
 import { LanguageSelector } from '../../components/common/LanguageSelector';
+import {
+  calculateRealtimePrediction,
+  CROP_MASTER_LIST,
+  SUPPORTED_MANDIS,
+  resolveCanonicalCropName,
+  resolveCanonicalMandi,
+} from '../../services/mandiPredictionEngine';
 import { CropListing } from '../../types';
 
 // Mock Procurement Recharts Data
@@ -95,6 +103,8 @@ export const BuyerDashboard: React.FC<{ navigate: (path: string) => void; initia
     joinGroupBuyingPool,
     logisticsVehicles,
     mandiPrices,
+    agmarknetConfig,
+    syncAgmarknet,
   } = useStore();
 
   const [activeTab, setActiveTab] = useState(initialTab);
@@ -104,6 +114,77 @@ export const BuyerDashboard: React.FC<{ navigate: (path: string) => void; initia
   const [selectedGrade, setSelectedGrade] = useState('All');
   const [onlyOrganic, setOnlyOrganic] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const [buyerForecastCrop, setBuyerForecastCrop] = useState<string>('Tomato');
+  const [buyerForecastMandi, setBuyerForecastMandi] = useState<string>('Kolar APMC Market');
+  const [buyerCropsList, setBuyerCropsList] = useState<string[]>(() => CROP_MASTER_LIST.map((c) => c.name));
+  const [buyerMandisList, setBuyerMandisList] = useState<string[]>(() => SUPPORTED_MANDIS.map((m) => m.mandi));
+  const [buyerOverviewForecast, setBuyerOverviewForecast] = useState(() =>
+    calculateRealtimePrediction({
+      crop: 'Tomato',
+      mandi: 'Kolar APMC Market',
+      season: 'Current',
+      weatherFactor: 'Optimal',
+      holidayImpact: 'None',
+      horizonDays: 7,
+    })
+  );
+  const [intelSearch, setIntelSearch] = useState('');
+  const [intelSyncing, setIntelSyncing] = useState(false);
+
+  React.useEffect(() => {
+    let mounted = true;
+    fetch('/api/predictions/crops')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!mounted || !data) return;
+        if (Array.isArray(data.crops) && data.crops.length > 0) {
+          setBuyerCropsList(data.crops.map((c: any) => c.name));
+        }
+        if (Array.isArray(data.mandis) && data.mandis.length > 0) {
+          setBuyerMandisList(data.mandis.map((m: any) => m.mandi));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [agmarknetConfig.lastSyncedAt]);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    const canonicalCrop = resolveCanonicalCropName(buyerForecastCrop);
+    const canonicalMandi = resolveCanonicalMandi(buyerForecastMandi)?.mandi || buyerForecastMandi;
+    setBuyerOverviewForecast(
+      calculateRealtimePrediction({
+        crop: canonicalCrop,
+        mandi: canonicalMandi,
+        season: 'Current',
+        weatherFactor: 'Optimal',
+        holidayImpact: 'None',
+        horizonDays: 7,
+      })
+    );
+    const qs = new URLSearchParams({
+      crop: canonicalCrop,
+      mandi: canonicalMandi,
+      days: '7',
+      season: 'Current',
+      weather: 'Optimal',
+      holiday: 'None',
+      language: language || 'en',
+    });
+    fetch(`/api/predictions/forecast?${qs.toString()}`, { signal: controller.signal })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!controller.signal.aborted && data?.forecast) {
+          setBuyerOverviewForecast(data.forecast);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      controller.abort();
+    };
+  }, [buyerForecastCrop, buyerForecastMandi, language, agmarknetConfig.lastSyncedAt]);
 
   // Settings State
   const [savedSettings, setSavedSettings] = useState(false);
@@ -571,6 +652,113 @@ export const BuyerDashboard: React.FC<{ navigate: (path: string) => void; initia
                 </div>
               </div>
 
+              {/* Live APMC Procurement AI Forecast Widget */}
+              <div className="p-6 rounded-3xl bg-slate-900 text-white shadow-xl space-y-4">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-cyan-300">
+                      {buyerOverviewForecast.liveApiConnected
+                        ? `Live data.gov.in Verified · ${buyerOverviewForecast.actualTradingDate || 'Today'}`
+                        : `AGMARKNET Historical Baseline · ${buyerOverviewForecast.actualTradingDate || 'Baseline'}`}
+                    </span>
+                    <h3 className="text-base font-black text-white flex items-center gap-2">
+                      <BarChart3 className="w-4 h-4 text-cyan-300" /> {buyerOverviewForecast.crop} &bull; {buyerOverviewForecast.mandi} Procurement Forecast
+                    </h3>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <select
+                      value={buyerForecastCrop}
+                      onChange={(e) => setBuyerForecastCrop(e.target.value)}
+                      className="px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-bold text-xs outline-none"
+                    >
+                      {Array.from(new Set([...buyerCropsList, buyerForecastCrop])).map((cropName) => (
+                        <option key={cropName} value={cropName}>{cropName}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={buyerForecastMandi}
+                      onChange={(e) => setBuyerForecastMandi(e.target.value)}
+                      className="px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-bold text-xs outline-none"
+                    >
+                      {Array.from(new Set([...buyerMandisList, buyerForecastMandi])).map((mandiName) => (
+                        <option key={mandiName} value={mandiName}>{mandiName}</option>
+                      ))}
+                    </select>
+                    <span
+                      className={`px-3 py-1.5 rounded-full font-bold ${
+                        buyerOverviewForecast.changePercent >= 0
+                          ? 'bg-amber-500/20 text-amber-300'
+                          : 'bg-emerald-500/20 text-emerald-300'
+                      }`}
+                    >
+                      {buyerOverviewForecast.trend === 'up'
+                        ? 'Rising Cost'
+                        : buyerOverviewForecast.trend === 'down'
+                        ? 'Buyer Dip'
+                        : 'Stable'}{' '}
+                      {buyerOverviewForecast.changePercent >= 0 ? '+' : ''}
+                      {buyerOverviewForecast.changePercent}%
+                    </span>
+                    <button
+                      onClick={() => {
+                        setActiveTab('intelligence');
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-[#00B8F0] text-slate-950 font-extrabold text-xs cursor-pointer hover:opacity-90"
+                    >
+                      Full Market Intelligence &rarr;
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="p-3 rounded-2xl bg-slate-800/80 border border-slate-700/80">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Actual Modal ({buyerOverviewForecast.actualTradingDate || 'Date'})</span>
+                    <span className="text-lg font-black text-white">₹{buyerOverviewForecast.todayPrice}/kg</span>
+                    <span className="text-[10px] text-slate-400 block">₹{buyerOverviewForecast.modalPriceQuintal || Math.round(buyerOverviewForecast.todayPrice * 100)}/Qtl</span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-slate-800/80 border border-slate-700/80">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">AI Tomorrow</span>
+                    <span className="text-lg font-black text-cyan-300">₹{buyerOverviewForecast.tomorrowPrice}/kg</span>
+                    <span className="text-[10px] text-slate-400 block">₹{Math.round(buyerOverviewForecast.tomorrowPrice * 100)}/Qtl</span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-slate-800/80 border border-slate-700/80">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">AI 7-Day Target</span>
+                    <span className="text-lg font-black text-[#C6FF4A]">₹{buyerOverviewForecast.day7Price}/kg</span>
+                    <span className="text-[10px] text-slate-400 block">₹{Math.round(buyerOverviewForecast.day7Price * 100)}/Qtl</span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-slate-800/80 border border-slate-700/80">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Model Confidence</span>
+                    <span className="text-lg font-black text-emerald-300">{buyerOverviewForecast.confidenceScore}%</span>
+                  </div>
+                </div>
+
+                <div className="h-56 w-full pt-1">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart
+                      data={(buyerOverviewForecast.forecastPoints || []).slice(0, 7).map((pt, idx) => ({
+                        day: idx === 0 ? `Today (${pt.dateStr})` : pt.dateStr,
+                        forecast: pt.predictedPrice,
+                        upper: pt.maxRange,
+                        lower: pt.minRange,
+                      }))}
+                      margin={{ top: 10, right: 10, left: -10, bottom: 0 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                      <XAxis dataKey="day" stroke="#94a3b8" tick={{ fontSize: 10 }} />
+                      <YAxis stroke="#94a3b8" tick={{ fontSize: 10 }} unit="₹" domain={['auto', 'auto']} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px', fontSize: '11px' }}
+                      />
+                      <Legend wrapperStyle={{ fontSize: '11px' }} />
+                      <Line type="monotone" dataKey="forecast" stroke="#00B8F0" strokeWidth={3} dot={{ r: 4 }} name="AI Procurement Target (₹/kg)" />
+                      <Line type="monotone" dataKey="upper" stroke="#64748b" strokeWidth={1} strokeDasharray="2 2" dot={false} name="Upper Bound" />
+                      <Line type="monotone" dataKey="lower" stroke="#64748b" strokeWidth={1} strokeDasharray="2 2" dot={false} name="Lower Bound" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
               {/* Quick Action Produce Preview */}
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
@@ -967,52 +1155,106 @@ export const BuyerDashboard: React.FC<{ navigate: (path: string) => void; initia
           )}
 
           {/* ===================================================================
-              6. MARKET INTELLIGENCE
+              6. MARKET INTELLIGENCE (Live data.gov.in + Buyer AI Price Forecaster)
              =================================================================== */}
           {activeTab === 'intelligence' && (
-            <div className="space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                  <h2 className="text-xl font-black text-cyan-950">APMC Mandi Intelligence &amp; Sourcing Arbitrage</h2>
-                  <p className="text-xs text-cyan-950/70">
-                    Real-time market rates across state mandis. Compare farm-gate asking prices against live modal rates.
-                  </p>
-                </div>
-                <span className="text-[10px] px-3 py-1 rounded-full bg-cyan-100 text-cyan-950 font-bold border border-cyan-300">
-                  Agmarknet Verified API
-                </span>
-              </div>
+            <div className="space-y-8">
+              {/* Interactive Buyer AI Price Prediction Engine */}
+              <AIPricePredictionTool
+                mode="buyer"
+                defaultCrop={buyerForecastCrop}
+                defaultMandi={buyerForecastMandi}
+              />
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {mandiPrices.map((m) => (
-                  <div key={m.id} className="p-5 rounded-3xl bg-white/85 backdrop-blur-xl border border-white/80 shadow-md space-y-3">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <h4 className="font-extrabold text-base text-cyan-950">{m.crop}</h4>
-                        <p className="text-xs text-cyan-950/70">{m.mandi}, {m.state}</p>
-                      </div>
-                      <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                        +{m.changePercent}%
-                      </span>
-                    </div>
-
-                    <div className="flex items-baseline justify-between pt-2 border-t border-cyan-950/10">
-                      <div>
-                        <span className="text-2xl font-black text-cyan-950">₹{m.pricePerKg}</span>
-                        <span className="text-xs text-cyan-950/70"> / kg modal</span>
-                      </div>
-                      <div className="text-right">
-                        <span className="text-xs font-bold text-[#00B8F0]">₹{m.ai7DayForecastPerKg}/kg</span>
-                        <span className="text-[10px] text-cyan-950/60 block">7-Day Target</span>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 text-[11px] text-cyan-950/70 bg-cyan-50/50 p-2.5 rounded-xl">
-                      <div>Arrival: <strong>{m.arrivalTons} Tons</strong></div>
-                      <div>Modal: <strong>₹{m.modalPrice}/Qtl</strong></div>
-                    </div>
+              <div className="space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-xl font-black text-cyan-950">APMC Mandi Intelligence &amp; Sourcing Arbitrage</h2>
+                    <p className="text-xs text-cyan-950/70">
+                      Real-time market rates from data.gov.in Agmarknet. Click any mandi card to inspect its multi-day procurement forecast above.
+                    </p>
                   </div>
-                ))}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="Filter crop, mandi or state..."
+                      value={intelSearch}
+                      onChange={(e) => setIntelSearch(e.target.value)}
+                      className="px-3.5 py-1.5 rounded-full bg-white border border-cyan-950/15 text-xs font-semibold outline-none focus:border-[#00B8F0]"
+                    />
+                    <button
+                      onClick={async () => {
+                        setIntelSyncing(true);
+                        await syncAgmarknet();
+                        setIntelSyncing(false);
+                      }}
+                      disabled={intelSyncing}
+                      className="px-3.5 py-1.5 rounded-full bg-[#0e7490] text-white text-xs font-bold cursor-pointer disabled:opacity-60"
+                    >
+                      {intelSyncing ? 'Syncing...' : 'Sync data.gov.in'}
+                    </button>
+                    <span className="text-[10px] px-3 py-1 rounded-full bg-cyan-100 text-cyan-950 font-bold border border-cyan-300">
+                      {agmarknetConfig.lastSyncedAt}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {(mandiPrices || [])
+                    .filter(
+                      (m) =>
+                        !intelSearch.trim() ||
+                        m.crop.toLowerCase().includes(intelSearch.toLowerCase()) ||
+                        m.mandi.toLowerCase().includes(intelSearch.toLowerCase()) ||
+                        m.state.toLowerCase().includes(intelSearch.toLowerCase())
+                    )
+                    .map((m) => (
+                      <div key={m.id} className="p-5 rounded-3xl bg-white/85 backdrop-blur-xl border border-white/80 shadow-md space-y-3 hover:border-[#00B8F0] transition-all">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <h4 className="font-extrabold text-base text-cyan-950">{m.crop}</h4>
+                            <p className="text-xs text-cyan-950/70">{m.mandi}, {m.state}</p>
+                          </div>
+                          <span
+                            className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                              m.changePercent >= 0
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-rose-100 text-rose-800'
+                            }`}
+                          >
+                            {m.changePercent >= 0 ? '+' : ''}{m.changePercent}%
+                          </span>
+                        </div>
+
+                        <div className="flex items-baseline justify-between pt-2 border-t border-cyan-950/10">
+                          <div>
+                            <span className="text-2xl font-black text-cyan-950">₹{m.pricePerKg}</span>
+                            <span className="text-xs text-cyan-950/70"> / kg modal</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-xs font-bold text-[#0e7490]">₹{m.ai7DayForecastPerKg}/kg</span>
+                            <span className="text-[10px] text-cyan-950/60 block">7-Day Target</span>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 text-[11px] text-cyan-950/70 bg-cyan-50/50 p-2.5 rounded-xl">
+                          <div>Arrival: <strong>{m.arrivalTons} Tons</strong></div>
+                          <div>Modal: <strong>₹{m.modalPrice}/Qtl</strong></div>
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            setBuyerForecastCrop(m.crop);
+                            setBuyerForecastMandi(m.mandi);
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          }}
+                          className="w-full py-2 rounded-xl bg-cyan-50 hover:bg-cyan-100 text-cyan-950 font-bold text-[11px] transition-all cursor-pointer"
+                        >
+                          Forecast {m.crop} at {m.mandi} &rarr;
+                        </button>
+                      </div>
+                    ))}
+                </div>
               </div>
             </div>
           )}
@@ -1023,7 +1265,7 @@ export const BuyerDashboard: React.FC<{ navigate: (path: string) => void; initia
           {activeTab === 'advisor' && (
             <div className="space-y-6">
               <div className="p-6 rounded-3xl bg-white/85 backdrop-blur-xl border border-white/80 shadow-xl space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-2">
                   <div>
                     <h2 className="text-xl font-black text-cyan-950 flex items-center gap-2">
                       <Sparkles className="w-5 h-5 text-[#00B8F0]" /> AI Procurement Assistant &amp; Price Negotiator
@@ -1032,9 +1274,17 @@ export const BuyerDashboard: React.FC<{ navigate: (path: string) => void; initia
                       Automated fair-price validation, mandi arbitrage suggestions, and bulk order contract formulation.
                     </p>
                   </div>
-                  <span className="text-[10px] px-3 py-1 rounded-full bg-emerald-100 text-emerald-950 font-bold">
-                    Gemini Sourcing Model
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setActiveTab('intelligence')}
+                      className="text-[11px] px-3 py-1 rounded-full bg-cyan-100 text-cyan-950 font-bold hover:bg-cyan-200 cursor-pointer"
+                    >
+                      Open Real-Time Mandi AI Forecaster &rarr;
+                    </button>
+                    <span className="text-[10px] px-3 py-1 rounded-full bg-emerald-100 text-emerald-950 font-bold">
+                      Gemini Sourcing Model
+                    </span>
+                  </div>
                 </div>
                 <AINegotiationTool />
               </div>
